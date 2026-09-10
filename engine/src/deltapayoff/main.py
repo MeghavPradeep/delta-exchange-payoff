@@ -806,7 +806,8 @@ def get_bar_writer() -> BarWriter:
 
 
 def get_watched_stream() -> ChainStream | None:
-    """The chain cache for `/health`, or `None` in a process whose lifespan never ran.
+    """The chain cache for `/health` and `/analyse`, or `None` in a process whose
+    lifespan never ran.
 
     A sibling of `get_supervisor` and `None` for the same reason: `/health` is what a
     monitor hits to find out whether anything is wrong, and a report that 500s because
@@ -814,6 +815,12 @@ def get_watched_stream() -> ChainStream | None:
     deliberately **not** `get_chain_stream`, which raises: that one serves `/ws/chain`,
     where a missing cache genuinely is a failure, and the tests override it with a
     hand-fed stream that has nothing to do with what the running app is solving.
+
+    **`/analyse` takes the lenient one for a second reason, and it is load-bearing.**
+    `docs/payoff-contract.md` promises a **503** when there is no live ladder — the answer
+    exists, it does not exist yet — and "the lifespan never ran" is that same fact, not a
+    different one. Depending on `get_chain_stream` here would turn it into an
+    `AttributeError` and a 500, which says the engine is broken rather than not ready.
     """
     return getattr(app.state, "stream", None)
 

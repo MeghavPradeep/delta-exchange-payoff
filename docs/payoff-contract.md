@@ -236,7 +236,7 @@ which is the half a browser cannot defend itself against.
 
 ## Refusals
 
-**Two envelopes, because there are two kinds of wrong.** Six of the seven rows below are
+**Two envelopes, because there are two kinds of wrong.** Seven of the eight rows below are
 **semantic** — the request is well formed and the engine will not answer it — and they travel
 as FastAPI's default `{"detail": "..."}`, raised by the route exactly as every other refusal
 in `main.py` is. The seventh, marked **schema**, is caught by `AnalyseRequest` itself before
@@ -255,11 +255,20 @@ must therefore expect either shape.
 | 503 | No live ladder yet — the chain cache has not warmed | the underlying and the expiry |
 | 422 | `legs` is empty — **schema**, see above | that `legs` must hold at least one leg |
 | 422 | The legs span more than one expiry | **both** expiries |
+| 422 | The legs span more than one underlying | **both** underlyings |
 | 422 | A leg has no quote on its side and no `entry_price` was supplied | the instrument, and which side was empty |
 
 **One expiry per strategy.** With two, there is no date on which every leg has finished, so the
 surviving leg has a price rather than a payoff and the line could only be drawn by assuming a
 volatility. Calendar and diagonal spreads are #2.
+
+**One underlying per strategy**, and this one is not merely out of scope. The ladder is fetched
+for one underlying, so a leg naming another is looked up on a chain that does not list it — and
+the only thing between that and a silently wrong answer is that BTC strikes are around 77,000
+and ETH's around 4,000. On a collision the response would carry one `underlying` and one
+`contract_value` for legs whose lot sizes differ by a factor of ten, and the screen would
+multiply some of them by the wrong number with nothing on the page saying so. An accident of
+arithmetic is not a refusal, so the refusal is written down.
 
 **A leg nobody is quoting is not disabled, it is asked about.** "What if I were filled at 900"
 is exactly the question an unquoted wing invites, so the refusal names the leg and the side and
@@ -289,8 +298,17 @@ transport, and the client's error path already exists.
 
 **No 502.** This route reads the chain cache or the local store and never calls Delta.
 
-**And no code at all for a response that breaches this contract.** A `forward` with no
-`discount`, or a leg carrying an `iv` with no Greeks, is refused by the models and leaves as a
-**500** — which is the honest answer, because that is our bug rather than a market condition.
-Inventing a refusal that meant "our own code is wrong" would let a real defect leave the
-building disguised as something the venue did.
+**And no code at all for a response that breaches this contract.** A `forward` published with
+no `discount` is refused by the models and leaves as a **500** — the honest answer, because
+half a fit reported as a whole one is our bug rather than a market condition, and inventing a
+refusal that meant "our own code is wrong" would let a real defect leave the building disguised
+as something the venue did.
+
+**A partly solved leg is not that, and is not a 500.** A strike carrying an `iv` with fewer
+than five Greeks beside it is a shape the store can hold — table C's Greek columns are nullable
+independently of `iv` — so it is a condition in the data, not a defect in us. That leg is
+published as **unfitted**: `iv` and `greeks` both `null`, and no `total_greeks` on the response,
+exactly as for a strike that never solved. **Dropping a number is not fabricating one** — the
+leg still says "no volatility here", which is true of what can be reported — whereas answering
+500 would be the inversion this document refuses, and publishing four Greeks and a `null` would
+put a missing exposure on screen where a reader skimming the column would read a zero.

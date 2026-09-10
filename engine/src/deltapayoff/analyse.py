@@ -13,13 +13,16 @@ is `main.py`'s business and nothing below reads a clock, a socket or a file. Tha
 what lets the fitted case be tested against rows a test wrote rather than against a solve
 that depends on today's date.
 
-**Four of the contract's six refusals are raised here** — the malformed instrument, the
-mixed expiry, the leg that is not listed and the leg nobody is quoting. The other two say
-that there is no ladder at all, which is a fact about the read path rather than about the
-legs, so they belong to the route that chose it. `AnalyseRefusal` carries the status code
-rather than the route re-deriving one from an exception type, because
-`docs/payoff-contract.md` fixes the code alongside the message and the two should not be
-able to drift apart.
+**Five of the contract's eight refusals are raised here** — the malformed instrument, the
+two legs that disagree about the underlying, the two that disagree about the expiry, the
+leg that is not listed and the leg nobody is quoting. Two of the others say that there is
+no ladder at all, which is a fact about the read path rather than about the legs, so they
+belong to the route that chose it; the last is an empty `legs`, which `AnalyseRequest`
+refuses on the type before this module is reached.
+
+`AnalyseRefusal` carries the status code rather than the route re-deriving one from an
+exception type, because `docs/payoff-contract.md` fixes the code alongside the message and
+the two should not be able to drift apart.
 """
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ from collections.abc import Sequence
 
 from .chain import CONTRACT_VALUES, EXPIRY_FORMAT, nearest_strike
 from .events.instrument import Instrument, InstrumentParseError, Right
-from .models import ChainResponse, ComputedLeg, Leg
+from .models import ChainResponse, ChainRow, ComputedLeg, Leg
 from .payoff import (
     PayoffLeg,
     payoff_curve,
@@ -59,15 +62,33 @@ class AnalyseRefusal(ValueError):
 def strategy_series(legs: Sequence[LegRequest]) -> tuple[list[Instrument], str, str]:
     """The legs' instruments, and the one underlying and expiry they name.
 
-    Parsed before any ladder is read, because the expiry is what decides *which* ladder
-    to read — and refused before any is read, because a strategy spanning two series has
-    no date on which every leg has finished. The surviving leg would then have a price
-    rather than a payoff, and the line could only be drawn by assuming a volatility.
-    Calendar and diagonal spreads are #2.
+    Parsed before any ladder is read, because the underlying and the expiry are what
+    decide *which* ladder to read — and refused before any is read, because one ladder
+    cannot answer for two series.
+
+    **Two expiries** leave no date on which every leg has finished: the surviving leg has
+    a price rather than a payoff, and the line could only be drawn by assuming a
+    volatility. Calendar and diagonal spreads are #2.
+
+    **Two underlyings** are refused for a harder reason than that. The ladder is fetched
+    for the first leg's underlying, so the others are looked up on a chain that does not
+    list them — and the only thing standing between that and a silently wrong answer is
+    that BTC strikes are around 77,000 and ETH's around 4,000. On a collision the response
+    would echo one `underlying` and one `contract_value` for legs whose lot sizes differ
+    by a factor of ten, and the screen would multiply some of them by the wrong number
+    with nothing on the page saying so. Multi-underlying strategies are out of scope by
+    the spec; this is what makes that a refusal rather than an assumption.
 
     `Instrument.from_canonical` is the single validator, and its message already names
     which of the six parts was wrong; it is passed through rather than rewritten.
     """
+    if not legs:
+        # Unreachable through the route — `AnalyseRequest.legs` is `min_length=1` and the
+        # type refuses an empty strategy before this is called. Here so that the function
+        # is total for the `Sequence` it declares: a direct caller would otherwise get an
+        # `IndexError` where every other malformed strategy gets a refusal.
+        raise AnalyseRefusal(422, "a strategy must hold at least one leg")
+
     instruments = []
     for leg in legs:
         try:
@@ -77,11 +98,19 @@ def strategy_series(legs: Sequence[LegRequest]) -> tuple[list[Instrument], str, 
             # exactly this for a bad string, and a wider catch here would answer 400 —
             # "you sent a malformed instrument" — for something that was not one.
             raise AnalyseRefusal(400, str(error)) from error
+    underlyings = sorted({instrument.underlying for instrument in instruments})
+    if len(underlyings) > 1:
+        raise AnalyseRefusal(
+            422,
+            "one underlying per strategy; these legs span "
+            + " and ".join(underlyings),
+        )
+
     expiries = sorted({instrument.expiry for instrument in instruments})
     if len(expiries) > 1:
         spelled = " and ".join(day.strftime(EXPIRY_FORMAT) for day in expiries)
         raise AnalyseRefusal(422, f"one expiry per strategy; these legs span {spelled}")
-    return instruments, instruments[0].underlying, expiries[0].strftime(EXPIRY_FORMAT)
+    return instruments, underlyings[0], expiries[0].strftime(EXPIRY_FORMAT)
 
 
 def analysed(
@@ -174,19 +203,36 @@ def _atm_iv(chain: ChainResponse, anchor: float | None) -> float | None:
     the basis is wider than half a gap.
     """
     strike = nearest_strike([row.strike for row in chain.rows], anchor)
-    if strike is None:
+    row = None if strike is None else _row_at(chain, strike)
+    if row is None:
         return None
-    for row in chain.rows:
-        if row.strike != strike:
-            continue
-        for leg in (row.call, row.put):
-            iv = leg.computed.iv if leg is not None and leg.computed else None
-            if iv is not None:
-                # Either side answers: parity gives the strike one volatility and
-                # `compute` writes it to both legs, with `iv_leg` naming where it came
-                # from. Reading the call first is a coin toss, not a preference.
-                return iv
+    for leg in (row.call, row.put):
+        iv = leg.computed.iv if leg is not None and leg.computed else None
+        if iv is not None:
+            # Either side answers: parity gives the strike one volatility and `compute`
+            # writes it to both legs, with `iv_leg` naming where it came from. Reading
+            # the call first is a coin toss, not a preference.
+            return iv
     return None
+
+
+def _row_at(chain: ChainResponse, strike: float) -> ChainRow | None:
+    """The ladder's row at one strike, or `None` if it lists none.
+
+    **Exact float equality, deliberately.** Both sides of this comparison are the
+    correctly-rounded double of the *same decimal literal* — the ladder's `strike` is
+    `float()` of the venue's own text (through `Instrument.strike` on the live path and
+    the symbol's digits on the stored one), and the value passed in is `float()` of the
+    `Decimal` that `from_canonical` read out of the request's copy of that same text.
+    Python rounds a decimal string to the nearest double deterministically, so `77600`
+    and `77600.0` and `Decimal("77600")` are one bit pattern and there is nothing for a
+    tolerance to absorb. No strike anywhere in this engine is ever *computed*, which is
+    the only way the two could drift.
+
+    And it **fails safe**: a mismatch finds no row and answers the 404 that names the
+    instrument, rather than silently returning a neighbouring strike's leg.
+    """
+    return next((row for row in chain.rows if row.strike == strike), None)
 
 
 def _listed(chain: ChainResponse, request: LegRequest, instrument: Instrument) -> Leg:
@@ -195,14 +241,12 @@ def _listed(chain: ChainResponse, request: LegRequest, instrument: Instrument) -
     A strike and a side do not name a contract — 77000 C trades in every series at once —
     so the whole canonical string is what is looked up and what the refusal quotes back.
     """
-    strike = float(instrument.strike)
-    for row in chain.rows:
-        if row.strike != strike:
-            continue
+    row = _row_at(chain, float(instrument.strike))
+    listed = None
+    if row is not None:
         listed = row.call if instrument.right is Right.CALL else row.put
-        if listed is not None:
-            return listed
-        break
+    if listed is not None:
+        return listed
     raise AnalyseRefusal(
         404,
         f"{request.instrument} is not listed on the {chain.underlying} "
@@ -240,8 +284,16 @@ def _entry_price(request: LegRequest, listed: Leg) -> float:
 
 def _greeks(computed: ComputedLeg | None) -> Greeks | None:
     """This strike's five exposures **per one unit and unsigned**, as `compute` solved
-    them. `None` unless all five and the volatility are there: a leg with no volatility
-    carries no Greeks, and five figures at some default sigma would describe nothing.
+    them. `None` unless all five and the volatility are there.
+
+    A leg with no volatility carries no Greeks: five figures at some default sigma would
+    describe nothing. **And a leg with four Greeks carries none either** — table C's five
+    columns are nullable independently of `iv`, so a partly-solved row is a shape the
+    store can hold, and the caller drops the `iv` with them so the pair stays exact. That
+    leg is then published as unfitted rather than answered with a 500: it is a condition
+    that arose in the data, and a real condition leaving as a server error is the
+    inversion this project is organised against. Dropping a number is not fabricating
+    one — `docs/payoff-contract.md`'s Refusals section carries the same ruling.
     """
     if computed is None or computed.iv is None:
         return None

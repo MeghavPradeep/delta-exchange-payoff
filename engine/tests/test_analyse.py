@@ -29,6 +29,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from deltapayoff.analyse import AnalyseRefusal, strategy_series
 from deltapayoff.main import (
     HistoricalSource,
     app,
@@ -538,6 +539,12 @@ def test_a_stored_minute_carries_the_volatility_and_the_weighted_greeks(
     assert body["discount"] == 0.99997892
 
     long_leg, short_leg = body["legs"]
+    # **Per one unit, and not scaled by the three.** `entry_price` is what one unit cost
+    # rather than what the leg cost, so it stays comparable with the bid and ask on the
+    # ladder it was taken from — 300, never 900. The Greeks beside it *are* scaled, which
+    # is the asymmetry `docs/payoff-contract.md` is explicit about.
+    assert long_leg["entry_price"] == 510.0
+    assert short_leg["entry_price"] == 300.0
     assert long_leg["iv"] == 0.4321
     assert short_leg["iv"] == 0.3907
     assert long_leg["greeks"] == {
@@ -776,3 +783,123 @@ def test_delta_own_greeks_and_volatility_change_nothing_here(
     assert honest.status_code == 200, honest.text
     assert nonsense.status_code == 200, nonsense.text
     assert nonsense.json() == honest.json()
+
+
+def test_legs_spanning_two_underlyings_are_refused_naming_both(
+    client: TestClient, live: ChainStream
+) -> None:
+    """The mixed-expiry refusal's sibling, and it fails the same silent way.
+
+    Only the BTC ladder is fed, and both legs name the strike it lists — so with no guard
+    the ETH leg **resolves on the BTC chain**, and the response comes back 200 echoing
+    `underlying: "BTC"` and `contract_value: 0.001` for a contract whose lot size is 0.01.
+    The screen then multiplies a tenth of the legs by the wrong number with nothing on the
+    page saying so.
+
+    That this is normally a 404 instead is an accident of arithmetic — BTC strikes are
+    around 77,000 and ETH's around 4,000, so they do not collide today — and an accident
+    is not a refusal. One underlying per strategy, named in the message, exactly as the
+    two expiries are.
+    """
+    feed(live, "C-BTC-77600-040926", 579, 584)
+
+    response = analyse(
+        client,
+        legs=[
+            {"instrument": CALL_77600, "direction": 1},
+            {"instrument": "DELTA-ETH-20260904-77600-C-USD", "direction": -1},
+        ],
+    )
+
+    assert response.status_code == 422, response.text
+    detail = response.json()["detail"]
+    assert "BTC" in detail
+    assert "ETH" in detail
+
+
+def test_a_leg_solved_without_all_five_greeks_is_published_as_unfitted(
+    client: TestClient, stores: HistoricalSource
+) -> None:
+    """A partially-solved leg is a **market and store condition**, not a server error.
+
+    Table C's five Greek columns are nullable independently of `iv`, so a row carrying a
+    volatility and only four Greeks is a shape the store can hold. There are three things
+    that could happen to it and only one of them is honest:
+
+      * publish the four and a `null` — the models refuse it, and rightly: `iv` and
+        `greeks` are paired exactly, and a Greek missing from a row of five would be read
+        as a zero exposure by anyone skimming the column;
+      * let it reach the models and answer **500** — which is what
+        `docs/payoff-contract.md` used to promise, and it is an inversion: a condition
+        that arose in the data would leave the building disguised as our bug;
+      * publish the leg as unfitted, `iv` and `greeks` both `null`.
+
+    The third. **Dropping a number is not fabricating one** — the leg still says "no
+    volatility here", which is true of what can be reported rather than a default sigma
+    invented to fill the gap — and the whole-response invariant follows: with one leg
+    unfitted there is no `total_greeks` either, because a sum over the legs that happened
+    to solve describes a different position from the one on screen.
+
+    The chain's own `forward` and `discount` survive: the fit succeeded, and it is this
+    one leg that did not.
+    """
+    at = datetime(2026, 9, 4, 9, 0, tzinfo=timezone.utc)
+    stores.quote.add(
+        [
+            quote_bar(minute=at, strike=77_600.0, bid=500.0, ask=510.0),
+            quote_bar(minute=at, strike=78_000.0, bid=300.0, ask=305.0),
+        ]
+    )
+    stores.reference.add(
+        [
+            reference_bar(minute=at, strike=77_600.0),
+            reference_bar(minute=at, strike=78_000.0),
+        ]
+    )
+    stores.computed.add(
+        [
+            # A volatility, and vega missing from beside it.
+            replace(computed_bar(minute=at, strike=77_600.0), vega=None),
+            replace(computed_bar(minute=at, strike=78_000.0, iv=0.3907), vega=20.0),
+        ]
+    )
+    stores.spot.add([spot_bar(minute=at)])
+    for store in (stores.quote, stores.reference, stores.computed, stores.spot):
+        store.flush()
+
+    response = analyse(
+        client,
+        legs=[
+            {"instrument": CALL_77600, "direction": 1},
+            {"instrument": CALL_78000, "direction": -1},
+        ],
+        as_of=MINUTE,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    partial, whole = body["legs"]
+    assert partial["iv"] is None
+    assert partial["greeks"] is None
+    assert whole["iv"] == 0.3907
+    assert whole["greeks"]["vega"] == -20.0
+    assert body["total_greeks"] is None
+    assert body["forward"] == 77_590.43
+    assert body["metrics"]["net_premium"] == 210.0
+
+
+def test_strategy_series_refuses_an_empty_list_rather_than_indexing_it() -> None:
+    """The one test here that skips the transport, because the route cannot reach this.
+
+    `AnalyseRequest.legs` is `min_length=1`, so an empty strategy is refused by the type
+    before `strategy_series` is called — but the signature says `Sequence[LegRequest]`,
+    and a direct caller (the pure core building a request in a test, the next route that
+    wants a strategy) would get an `IndexError` off `instruments[0]` instead of the
+    refusal every other malformed strategy gets. A function that is total for its declared
+    argument type costs one line.
+    """
+    with pytest.raises(AnalyseRefusal) as refusal:
+        strategy_series([])
+
+    assert refusal.value.status_code == 422
+    assert "at least one leg" in str(refusal.value)
