@@ -33,9 +33,9 @@ are genuinely new logic, and four decisions had no home anywhere in the design:
    `await asyncio.to_thread(read_ladder_at, ...)`.
 2. **Leg resolution** — canonical string → strike → ladder row → side → a 404 when absent. Exists
    nowhere else: `payoff.py` refuses the vocabulary and `chain.py` pivots rather than looks up.
-3. **Crossing the spread** — ask when bought, bid when sold, a supplied price winning, an empty
-   side refusing the whole analysis. Eleven lines, and the feature's central pricing decision;
-   nothing upstream had a concept of *a side of the book being taken*.
+3. **Crossing the spread** — ask when bought, bid when sold, a supplied price winning, an empty side
+   refusing the whole analysis. Eleven lines, and the feature's central pricing decision; nothing
+   upstream had a concept of *a side of the book being taken*.
 4. **The window's inputs** — something must pick an anchor, a volatility and a time off a
    `ChainResponse`: the fitted forward first, spot otherwise, neither if non-positive; and the
    volatility of the strike nearest the **anchor**, not `chain.atm_strike`, which is nearest spot.
@@ -50,7 +50,7 @@ is `analyse.py`; nothing in it could move into the pure core without handing `pa
    `entry_price` — the engine crosses the spread at analysis time — or `dropFirst` removes one lot.
 2. **Open.** *Analyse* is an `<a target="_blank">` carrying `analyseHref(legs, minute)`, so a tab
    opened from a pinned minute stays there. `app/analyse/page.tsx` reads `legs=` **raw and
-   undecoded**: a malformed link is reported, never treated as absent.
+   undecoded** — a malformed link is reported, not treated as absent.
 3. **Ask.** `subscribeAnalysis` asks once, then polls at `POLL_MS = 1000` (live) or registers **no
    timer at all** (a named minute). An in-flight guard skips a tick whose predecessor has not
    answered; `legs: []` asks nothing.
@@ -70,9 +70,9 @@ the contract illustrated this with "37% at 82 days", wrong by 3.6× (`0.37·√(
 caught in review. Recorded as an instance of the rule, not merely fixed.
 
 **"One line, and it does not move" is only half true.** It holds for a leg with a **typed** entry
-price. A leg still priced off the live book re-prices from the ask or the bid every poll, so its
-corners genuinely move — correctly: a trade not yet entered has no fixed cost, and freezing the
-first quote seen would invent a fill that never happened.
+price; a leg still priced off the live book re-prices from the ask or the bid every poll, so its
+corners genuinely move — correctly, since a trade not yet entered has no fixed cost and freezing
+the first quote seen would invent a fill that never happened.
 
 **Zoom out is unlimited, and the wall at price 0 is not a cap.** The underlying cannot finish below
 zero and the engine's own `_extremes` already treats price 0 as a vertex — which is why only the
@@ -80,8 +80,8 @@ right tail can be unbounded — so `zoomAbout` **slides** the window rather than
 reader keeps the width they asked for and zooming out at the wall keeps widening rightward.
 Useful for about a decade of width: `derived` from the `measured` polylines P5's tests pin, the
 butterfly's kinked region falls from 33% of the frame at ±3σ to 2% at 16× and ~0.5% at 64×, thinner
-than the stroke, past which every strategy is two straight lines. A soft cap there was proposed
-and **rejected** — a reader stopped at a cap cannot get past it, the sibling's failure re-introduced.
+than the stroke, past which every strategy is two straight lines. **A soft cap at that ~16× was
+proposed and rejected** — a reader stopped at a cap cannot get past it, the sibling's failure.
 
 ## 5. Failure modes, and what the reader sees
 
@@ -100,12 +100,12 @@ and **rejected** — a reader stopped at a cap cannot get past it, the sibling's
 
 ## 6. Numbers
 
-**Run `t7-analyse`** — `measured` 2026-09-10, against the committed capture
-`ws-ticker-04-09-2026.json` + `ws-ob-l2-04-09-2026.json` (136 symbols, 69 strikes, both channels
-through the producer's own decoder into a `ChainStream`), `POST /analyse` over `TestClient`,
+**Run `t7-analyse`** — `measured` 2026-09-10 against the committed capture
+`ws-ticker-04-09-2026.json` + `ws-ob-l2-04-09-2026.json` (136 symbols, 69 strikes, both channels,
+through the real decoder into a `ChainStream`), `POST /analyse` over `TestClient`,
 `DELTA_LIVE_FEED=0`, 50 requests a case. `fetched_at` frozen at the capture's own instant so the
-chain **fits** — re-dated to today it expires unfitted, and an unfitted four-leg response is
-`measured` 1,680 B, **31% smaller**, which would have understated every byte figure below.
+chain **fits**: re-dated to today it expires unfitted at `measured` **1,680 B**, `derived`
+**31% smaller**, understating every byte below.
 
 | Strategy | bytes | gzip | corners | table rows | median | p95 | one minute, one tab |
 |---|---|---|---|---|---|---|---|
@@ -117,33 +117,36 @@ chain **fits** — re-dated to today it expires unfitted, and an unfitted four-l
 Every cell `measured` except the last column, `derived` as bytes × 60 ÷ 1024. **Solve time is flat
 in the leg count** — 3.33 → 3.56 ms from one leg to six — because the ladder is already solved and
 the rest is arithmetic over a handful of corners. `derived`: 3.6 ms once a second is **0.36% of one
-core per open tab**, so the cadence stops being free past a hundred simultaneous analyse tabs,
-which is not a load this project has. These reproduce P6's independent run (2,447 B / 3.3 ms on its
-own four-leg strategy) to within a byte and 0.3 ms, and confirm its **41.3%** never-changing share —
-`curve` + `table` + `metrics`, `measured` here at 1,037 B of 2,448, **42.4%**.
+core per open tab**, free until a hundred simultaneous tabs. These reproduce P6's independent run
+(2,447 B / 3.3 ms, its own four legs) to within a byte and 0.3 ms, and confirm its **41.3%**
+never-changing share — `curve` + `table` + `metrics`, `measured` here 1,037 B of 2,448, **42.4%**.
 
 **Run `t7-spread`** — `measured` 2026-09-10 against the committed REST snapshot
 `engine/tests/fixtures/tickers-btc-04-09-2026.json`. All **128** contracts are two-sided. Spread as
 a share of mid: median **1.81%**, p90 **46.15%**, max **116.67%** (`P-BTC-58000-040926`, 0.5 / 1.9),
 narrowest **0.43%** (`C-BTC-78000-040926`, 700.0 / 703.0); at the money `C-BTC-77000-040926` quotes
-1208.0 / 1231.0 — 23.0 wide, 1.89%. In dollars, at `contract_value` 0.001:
+1208.0 / 1231.0 — 23.0 wide, 1.89%. In dollars — per underlying `measured`, per contract `derived`
+as `× contract_value` 0.001:
 
 | Structure | crossed, per underlying | per contract |
 |---|---|---|
-| ATM straddle, 77,000 C + P | 37.00 | **$0.0370** `measured` |
-| ATM call spread, 77,000 / 78,000 | 26.00 | **$0.0260** `measured` |
-| Iron condor, 74/75 P and 79/80 C | 33.00 | **$0.0330** `measured` |
-| A generic two-leg — twice the median leg (16.00) | 32.00 | $0.0320 `derived` |
+| ATM straddle, 77,000 C + P | 37.00 | **$0.0370** |
+| ATM call spread, 77,000 / 78,000 (23.00 + 3.00) | 26.00 | **$0.0260** |
+| Iron condor, 74/75 P and 79/80 C | 33.00 | **$0.0330** |
+| A generic two-leg — twice the median leg (16.00) | 32.00 `derived` | $0.0320 |
 
 **A typical two-leg structure crosses about three cents a contract**, and the p90 says where that
 stops being true: a wing quotes 46% of mid, so the *share* it gives up is twenty-five times the
-ATM one even though the dollars are fewer. Crossed silently — **#1**.
+ATM one even though the dollars are fewer. Crossed silently — **#1**. **The two runs above do not
+share a board and their quotes will not reconcile**: `C-BTC-77000-040926` is 1208 / 1231 in this
+REST snapshot and 877 / 887 in `t7-analyse`'s websocket capture, two committed fixtures taken at
+different instants. Each run names its own; neither is wrong.
 
 **Run `t7-curve`** — corner points against a 400-point sampled curve. The corner side is `measured`
 (each response's `curve.corners`, serialised compactly); the sampled side is **`derived`** — the cost
-of 400 `{price, pnl}` pairs at 2 decimals, because this feature has no sampling path and building
-one to weigh it would be building the thing the measurement exists to reject. At full float
-precision the sample is 16.8–18.2 KB `derived`; the kinder reading still loses.
+of 400 `{price, pnl}` pairs at 2 decimals, because this feature has no sampling path and building one
+to weigh it would be building the thing the measurement exists to reject. At full float precision the
+sample is 16.8–18.2 KB `derived`; the kinder reading still loses.
 
 | Strategy | corners | 400 points @2dp | whole response | with a 400-point curve |
 |---|---|---|---|---|
@@ -165,16 +168,15 @@ territory. P5's report said `~1e-6`; review corrected it by 10× and this run co
 
 **"Corner points are smaller on the wire" survives, by a factor nobody expected** — **47–88×**
 smaller than a 400-point sample of the same line, and swapping them in would grow the *whole*
-response 6×. Not merely true; understated.
+response `derived` **5.1–7.8×** (7.8 at two legs, 5.1 at six). Not merely true; understated.
 
 **"The fat response is worth the round trips it saves" survives, but not for its stated reason.**
-P6 found 41.3% of a four-leg response never changes between ticks, which reads as an argument for a
-leaner refresh — until you find that **the responses are not compressed at all** today (no
+P6 found 41.3% of a four-leg response never changes between ticks — an argument for a leaner
+refresh, until you find that **the responses are not compressed at all** today (no
 `content-encoding`). gzip takes the four-leg body from 2,448 B to **901 B**, a **63%** saving,
-larger than the 41% a second response shape could ever reach, for one middleware and no change to
-the contract. If the poll ever needs to cost less, that is the first move; this feature builds
-neither. **What did not survive is the spec's account of its own architecture** — §2 — and that was
-found by writing code, not by measuring anything.
+larger than the 41% a leaner shape could reach, for one middleware. If the poll must cost less that
+is the first move; neither is built here. **What did not survive is the spec's account of its own
+architecture** — §2 — found by writing code, not by measuring anything.
 
 ## 7. Costs accepted on the record
 
@@ -183,12 +185,10 @@ found by writing code, not by measuring anything.
 - **One expiry per strategy** — #2. With two, no date exists on which every leg has finished.
 - **`AnalyseScreen`'s composition has no automated test** — `jsdom`, `happy-dom` and
   `@testing-library` are all absent from `web/node_modules`, so the decisions were pushed into pure
-  functions (`syncedAnalyseHref`, the three `commit*`, `priceAtPointer`) and only the thinnest
-  wiring is unverified.
-- **No browser exists in this environment.** Layout, gestures, focus and blur are unverified on both
-  screens; every rendering claim in the tests is about markup.
-- Open beside this: **#10** (a test flaking on a `measured` 247 ms margin) and **#11** (the ladder
-  is 21 columns and nobody has looked at it).
+  functions (`syncedAnalyseHref`, the three `commit*`, `priceAtPointer`); only the wiring is unverified.
+- **No browser exists here.** Layout, gestures, focus and blur are unverified on both screens; every
+  rendering claim in the tests is about markup.
+- Open beside this: **#10** (a test flaking on a `measured` 247 ms margin), **#11** (21 columns).
 
 ## 8. The seams the tests drive
 
@@ -196,4 +196,4 @@ found by writing code, not by measuring anything.
 contract's worked example); the route under `TestClient` with a hand-fed `ChainStream` and four
 `BarStore`s on `tmp_path` (`test_analyse.py`, 23); the models (`test_payoff_contract.py`, 21); and,
 on the web side, the URL codec, the geometry, the edit modules and `renderToStaticMarkup`
-fingerprints. No test touches the network, `data/` or the wall clock.
+fingerprints. Nothing touches the network, `data/` or the wall clock.

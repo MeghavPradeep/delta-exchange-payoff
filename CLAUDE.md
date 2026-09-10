@@ -53,10 +53,10 @@ than trusting a quoted figure.
 
 ## Architecture
 
-**One socket, one cache, many browsers.** `DeltaFeed` (`feed.py`) owns the single connection to
-Delta and subscribes every live contract on both channels. **This paragraph has drifted — see
-Known drift: `DeltaFeed` now lives in `adapters/delta_socket.py` and `LIVE_UNDERLYINGS` is
-`("BTC", "ETH")`.** It publishes to `FanOut`
+**One socket, one cache, many browsers.** `DeltaFeed` (`adapters/delta_socket.py`) owns the single
+connection to Delta and subscribes every live contract on both channels — `LIVE_UNDERLYINGS` in
+`main.py` is `("BTC", "ETH")`, overridable by `DELTA_LIVE_UNDERLYINGS`, so **ETH is on the live
+feed and in the store**. It publishes to `FanOut`
 (`fanout.py`), an in-process bus. The socket handler never runs inside a consumer — if it did,
 a slow flush would stop it reading, the receive buffer would fill, and Delta would close the
 connection. Sockets are per browser; the connection to Delta is not. A second tab costs a
@@ -170,9 +170,10 @@ The docs are the record, but several have fallen behind the code:
 - **`docs/handoff.md` says 291 tests passing and names #5 as the ticket to start on.** #5's
   storage layer has since landed (four commits through `d164ba2`), `docs/storage.md` is its
   findings document and is not in handoff's reading list.
-- **This file's own architecture section names `feed.py` and `LIVE_UNDERLYINGS = ("BTC",)`.**
-  `DeltaFeed` is in `adapters/delta_socket.py`; `main.py:181` reads `("BTC", "ETH")`, overridable
-  by `DELTA_LIVE_UNDERLYINGS`. **ETH is on the live feed and in the store.** Verified 2026-09-10.
+- **`docs/architecture.md:190` still says `LIVE_UNDERLYINGS` is `("BTC",)` and that "ETH is served
+  over REST but is not on the live feed and is not stored".** Both false since #43. `main.py:181`
+  reads `("BTC", "ETH")` and `DeltaFeed` is `adapters/delta_socket.py:143` — there is no `feed.py`.
+  This file said the same until 2026-09-10, when §Architecture above was corrected in place.
 - **The payoff feature is not in any doc listed above.** It added `payoff_models.py`, `payoff.py`
   and `analyse.py` and the `POST /analyse` route; its interface is `docs/payoff-contract.md` and
   its findings document [docs/design/lld/payoff.md](docs/design/lld/payoff.md).
