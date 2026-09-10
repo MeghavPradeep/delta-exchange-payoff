@@ -25,6 +25,7 @@ file, and change the row's status to a link. Do not write one ahead of the code.
 | The bars read path — one contract's minute bars for a date | [bars-read-path.md](bars-read-path.md) | #46 |
 | Re-listing — the cadence, the live subscribe, settled contracts | [relisting.md](relisting.md) | #51 |
 | The Redis Streams bus — the two policies over a broker, batching, trimming, replay | [redis-bus.md](redis-bus.md) | #61 |
+| The payoff feature — the pure core, the composition layer, `POST /analyse`, the screen | [payoff.md](payoff.md) | #9, #3, #4, #5, #6, #7 |
 
 ## What a low-level design should contain
 

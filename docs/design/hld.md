@@ -131,11 +131,11 @@ services, the containers and the replaying store are I3 to I5.
 
 ### 2.6 The public surface and the screens
 
-`main.py` serves `/expiries`, `/chain`, `/smile`, `/iv-vs-rv`, `/recording`, `/health` and
-`/ws/chain`. The websocket sends three message types today — `chain`, `waiting`, `error` — and
-will gain a fourth, `feed`, carrying the adapter's state on every transition and once on connect
-(#40). Two REST routes will be added: a contract's minute bars for a date (#46), and the ladder at
-one stored minute with the day's stored minutes beside it (#45).
+`main.py` serves `/expiries`, `/chain`, `/chain/minutes`, `/chain/at`, `/smile`, `/volatility`,
+`/volatility/bounds`, `/bars`, `/recording`, `/feed/{adapter}/{command}`, `/health`, `/ws/chain`
+and **`POST /analyse`** — the payoff route, a `POST` for its request and not for any effect
+([lld/payoff.md](lld/payoff.md)). The websocket sends three message types today — `chain`,
+`waiting`, `error` — and will gain a fourth, `feed`, on every transition and once on connect (#40).
 
 `web/` renders and computes nothing. It will wear a badge on the ladder header whenever the feed
 is not `connected`, clearing on recovery (#40); gain a chart panel of a contract's minute candles

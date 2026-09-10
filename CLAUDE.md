@@ -54,9 +54,9 @@ than trusting a quoted figure.
 ## Architecture
 
 **One socket, one cache, many browsers.** `DeltaFeed` (`feed.py`) owns the single connection to
-Delta and subscribes every live contract on both channels — `LIVE_UNDERLYINGS` in `main.py` is
-`("BTC",)`, so **ETH is served over REST but is not on the live feed or in the store**. It
-publishes to `FanOut`
+Delta and subscribes every live contract on both channels. **This paragraph has drifted — see
+Known drift: `DeltaFeed` now lives in `adapters/delta_socket.py` and `LIVE_UNDERLYINGS` is
+`("BTC", "ETH")`.** It publishes to `FanOut`
 (`fanout.py`), an in-process bus. The socket handler never runs inside a consumer — if it did,
 a slow flush would stop it reading, the receive buffer would fill, and Delta would close the
 connection. Sockets are per browser; the connection to Delta is not. A second tab costs a
@@ -152,7 +152,7 @@ mirrors it field for field. The websocket sends the identical object `/chain` re
 
 ## Known drift — verify before trusting
 
-The docs are the record, but four of them have fallen behind the code:
+The docs are the record, but several have fallen behind the code:
 
 - **Root `README.md` says the options are inverse-settled.** They are not.
   `docs/settlement.md` measured it. The README was never updated behind it.
@@ -164,14 +164,23 @@ The docs are the record, but four of them have fallen behind the code:
   `lib/engine.ts`, so the expiry dropdown populates, but the ladder now comes from
   `subscribeChain` in `app/page.tsx`, which has no fixture branch. With no engine reachable,
   fixture mode renders the header and nothing under it.
-- **`engine/README.md`'s layout section lists five modules.** There are twenty; `bars.py` and
-  `store.py` alone are ~2,300 lines.
+- **`engine/README.md`'s layout section lists five modules.** There are **thirty-two**, plus the
+  `adapters/` and `events/` packages; `bars.py` and `store.py` alone are ~2,300 lines. Counted
+  2026-09-10 — the "twenty" recorded here earlier was itself stale.
 - **`docs/handoff.md` says 291 tests passing and names #5 as the ticket to start on.** #5's
   storage layer has since landed (four commits through `d164ba2`), `docs/storage.md` is its
   findings document and is not in handoff's reading list.
+- **This file's own architecture section names `feed.py` and `LIVE_UNDERLYINGS = ("BTC",)`.**
+  `DeltaFeed` is in `adapters/delta_socket.py`; `main.py:181` reads `("BTC", "ETH")`, overridable
+  by `DELTA_LIVE_UNDERLYINGS`. **ETH is on the live feed and in the store.** Verified 2026-09-10.
+- **The payoff feature is not in any doc listed above.** It added `payoff_models.py`, `payoff.py`
+  and `analyse.py` and the `POST /analyse` route; its interface is `docs/payoff-contract.md` and
+  its findings document [docs/design/lld/payoff.md](docs/design/lld/payoff.md).
 
 **State of `main` as measured 2026-09-04, after `a018fb3`:** `ruff` clean, **468 passed /
-1 failed** under Python 3.12. The one failure is
+1 failed** under Python 3.12. **That count is long stale** — `measured` 2026-09-10 on
+`feature/payoff`, the suite is **1,134 passed / 1 failed / 13 skipped** (13 Redis tests skip
+without a reachable Docker daemon). The one failure is unchanged and is
 `test_solvers.py::test_every_solver_round_trips_or_declines[70000.0-0.05-S3]` — S3 returns
 0.625 for a price that underflowed to exactly 0.0, where the contract says it must decline.
 It may be genuine or may be the 3.12/3.13 and NumPy/SciPy version gap; nobody has checked.
