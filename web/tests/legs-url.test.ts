@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 
 import type { LegRequest } from "@/lib/payoff";
-import { LegsUrlError, decodeLegs, encodeLegs } from "@/lib/legs-url";
+import { LegsUrlError, decodeLegs, encodeLegs, syncedUrl } from "@/lib/legs-url";
 
 let failures = 0;
 
@@ -143,6 +143,40 @@ check("never returns a partial strategy — one broken fragment, nothing decoded
     /* expected */
   }
   assert.equal(decoded, "not assigned");
+});
+
+console.log("\nlegs-url / syncedUrl — the address bar never eats a malformed link");
+
+// Follow-up to P4 (#5): the chain screen's own URL-sync effect built its query
+// unconditionally — `chainQuery(...)`, no `legsError` in sight — so a malformed
+// `?legs=` link was destroyed by the ~200ms settle timer before the reader could copy
+// the broken text back out. `syncedAnalyseHref` already fixed this on the analyse
+// screen (P6); `syncedUrl` is the general gate underneath it, so `ChainScreen`'s own
+// query builder can be routed through the same rule rather than reinventing it.
+
+check("THE BUG, REPRODUCED: a malformed link's query is still rewritten, unconditionally", () => {
+  // This is exactly today's defect, expressed directly: a caller's own URL builder,
+  // handed a parse failure, must come back `null` — not the built string — or the
+  // 200ms settle timer erases the text the reader needs to fix their link.
+  const query = syncedUrl(
+    'cannot read "DELTA-BTC:X" as a leg: bad quantity',
+    () => "?underlying=BTC&expiry=04-09-2026",
+  );
+  assert.equal(query, null, "no rewrite at all while a parse failure is on screen");
+});
+
+check("no legsError: the built query is returned unchanged", () => {
+  const query = syncedUrl(null, () => "?underlying=BTC&expiry=04-09-2026");
+  assert.equal(query, "?underlying=BTC&expiry=04-09-2026");
+});
+
+check("build is never called while a parse failure is on screen", () => {
+  let calls = 0;
+  syncedUrl("cannot read ... as a leg: bad quantity", () => {
+    calls++;
+    return "?should-not-be-built";
+  });
+  assert.equal(calls, 0, "the caller's URL builder must not even run");
 });
 
 if (failures > 0) {

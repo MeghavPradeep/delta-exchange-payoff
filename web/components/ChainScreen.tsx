@@ -18,7 +18,7 @@ import {
 import { ENGINE_URL, loadChainAt, loadChainMinutes, loadExpiries } from "@/lib/engine";
 import { looksCanonical } from "@/lib/instrument";
 import { addLeg, dropFirst, heldAt } from "@/lib/legs";
-import { LegsUrlError, analyseHref, decodeLegs, encodeLegs } from "@/lib/legs-url";
+import { LegsUrlError, analyseHref, decodeLegs, encodeLegs, syncedUrl } from "@/lib/legs-url";
 import {
   feedBadge,
   LIVE_STATUS_LABEL,
@@ -326,13 +326,25 @@ export default function ChainScreen({
   // mean "live", which is what the reader is looking at, not the last sealed minute.
   useEffect(() => {
     if (!expiry) return;
-    const query = chainQuery(underlying, expiry, following ? null : stamp, panelInstrument, legs);
+    // **`syncedUrl`, never `chainQuery` unwrapped.** Follow-up to P4 (#5): this effect
+    // used to call `chainQuery(...)` unconditionally, so a malformed `?legs=` link was
+    // erased by this very settle timer before the reader could copy the broken text
+    // back out — diagnosed correctly in P4's review, but the remedy applied there
+    // (clearing the notice once the reader made an edit) stopped the notice going
+    // stale without stopping the rewrite that caused it. `syncedUrl` is the shared
+    // gate `lib/legs-url.ts` now carries for exactly this — see its own comment for
+    // the invariant and the rest of this history — and it is what `AnalyseScreen`
+    // already routes its own query builder through, via `syncedAnalyseHref`.
+    const query = syncedUrl(legsError, () =>
+      chainQuery(underlying, expiry, following ? null : stamp, panelInstrument, legs),
+    );
+    if (query === null) return;
     if (window.location.search === query) return;
     const timer = window.setTimeout(() => {
       window.history.replaceState(null, "", query);
     }, URL_SETTLE_MS);
     return () => window.clearTimeout(timer);
-  }, [underlying, expiry, following, stamp, panelInstrument, legs]);
+  }, [underlying, expiry, following, stamp, panelInstrument, legs, legsError]);
 
   const pickUnderlying = (next: Underlying) => {
     setUnderlying(next);
