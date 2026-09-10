@@ -233,6 +233,9 @@ def test_a_vertical_spread_comes_back_whole(
     assert corners[78_000.0] == 216.0
     assert body["curve"]["slope_left"] == 0.0
     assert body["curve"]["slope_right"] == 0.0
+    # And zero rather than **minus** zero on the wire, which `== 0.0` cannot tell apart:
+    # this strategy has no puts at all, which is the case that produces one.
+    assert math.copysign(1.0, body["curve"]["slope_left"]) == 1.0
     assert body["curve"]["window"]["low"] < body["curve"]["window"]["high"]
 
     assert body["metrics"] == {
@@ -383,7 +386,14 @@ def test_an_empty_strategy_is_refused_rather_than_drawn_blank(
     response = analyse(client, legs=[])
 
     assert response.status_code == 422, response.text
-    assert "legs" in response.text
+    # **The one refusal on this contract that is not a string.** It is caught by
+    # `AnalyseRequest` before the route is entered, so FastAPI's request-validation
+    # envelope answers — a list under `detail`, naming the field — where the six semantic
+    # refusals answer `{"detail": "..."}`. `docs/payoff-contract.md` marks the split; a
+    # client reading `detail` has to expect either shape, so it is pinned here.
+    detail = response.json()["detail"]
+    assert isinstance(detail, list)
+    assert detail[0]["loc"] == ["body", "legs"]
 
 
 def test_a_live_cache_that_has_not_warmed_is_a_503(

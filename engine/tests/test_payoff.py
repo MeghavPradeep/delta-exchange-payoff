@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import math
 
 import pytest
 
@@ -98,6 +99,31 @@ def test_the_end_slopes_are_the_net_call_and_put_quantities() -> None:
     assert end_slopes([CONTRACT_CALL]) == (0.0, 1.0)
     assert end_slopes(SHORT_STRANGLE) == (1.0, -1.0)
     assert end_slopes(BUTTERFLY) == (0.0, 0.0)
+
+
+def test_a_zero_slope_is_zero_and_never_minus_zero() -> None:
+    """`-0.0` is a real float, a valid JSON number, and a lie on a chart.
+
+    An all-call strategy has no puts, so the left slope is `-sum(nothing)` — and IEEE 754
+    says the negation of positive zero is **negative** zero. It compares equal to zero
+    everywhere, so nothing in this suite or in the browser catches it; it survives
+    `JSON.parse` intact and then `Number(-0).toFixed(2)` renders `"-0.00"` on an axis
+    beside four honest numbers, which is exactly the kind of detail that makes a reader
+    stop trusting the other four.
+
+    `copysign` is the assertion because `== 0.0` cannot tell the two apart.
+    """
+    left, right = end_slopes([CONTRACT_CALL])
+
+    assert math.copysign(1.0, left) == 1.0, "the left slope came back as minus zero"
+    assert math.copysign(1.0, right) == 1.0
+    assert (left, right) == (0.0, 1.0)
+
+    # The butterfly is the other way in: both ends are zero, and its left one is the
+    # negation of a genuine zero sum rather than of an empty one.
+    flat_left, flat_right = end_slopes(BUTTERFLY)
+    assert math.copysign(1.0, flat_left) == 1.0
+    assert math.copysign(1.0, flat_right) == 1.0
 
 
 def test_the_window_opens_three_standard_deviations_either_side_of_the_anchor() -> None:

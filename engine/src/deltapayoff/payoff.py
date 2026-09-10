@@ -155,7 +155,13 @@ def end_slopes(legs: Sequence[PayoffLeg]) -> tuple[float, float]:
     # strategy would otherwise put a `0` where the contract's type says `0.0`.
     calls = float(sum(leg.weight for leg in legs if leg.is_call))
     puts = float(sum(leg.weight for leg in legs if not leg.is_call))
-    return -puts, calls
+    # **`+ 0.0` is not a no-op**, and it is the whole reason this is not one line. IEEE
+    # 754 negates positive zero to `-0.0`, so an all-call strategy — which has no puts at
+    # all — leaves here with a left slope of minus zero. It compares equal to zero
+    # everywhere, survives `JSON.parse` intact, and then renders as `-0.00` on an axis
+    # beside four honest numbers. Adding zero folds it back and leaves every other value
+    # untouched.
+    return -puts + 0.0, calls + 0.0
 
 
 def suggested_window(

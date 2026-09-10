@@ -236,7 +236,16 @@ which is the half a browser cannot defend itself against.
 
 ## Refusals
 
-FastAPI's default shape, `{"detail": "..."}`.
+**Two envelopes, because there are two kinds of wrong.** Six of the seven rows below are
+**semantic** — the request is well formed and the engine will not answer it — and they travel
+as FastAPI's default `{"detail": "..."}`, raised by the route exactly as every other refusal
+in `main.py` is. The seventh, marked **schema**, is caught by `AnalyseRequest` itself before
+the route is entered, so it arrives in FastAPI's request-validation envelope instead —
+`{"detail": [{"type": ..., "loc": ["body", "legs"], "msg": ...}]}`, a **list** rather than a
+string. That rule lives on the type on purpose: the pure core builds these models directly,
+so the type is what stops a core-side bug producing an empty strategy, and moving the check
+into the route to unify the envelope would take it off the type. A client reading `detail`
+must therefore expect either shape.
 
 | Status | When | The message names |
 |---|---|---|
@@ -244,7 +253,7 @@ FastAPI's default shape, `{"detail": "..."}`.
 | 404 | A leg's instrument is not listed on the chain being analysed | the instrument string |
 | 404 | An `as_of` minute the store does not hold | the underlying, the expiry and the minute |
 | 503 | No live ladder yet — the chain cache has not warmed | the underlying and the expiry |
-| 422 | `legs` is empty | that `legs` must hold at least one leg |
+| 422 | `legs` is empty — **schema**, see above | that `legs` must hold at least one leg |
 | 422 | The legs span more than one expiry | **both** expiries |
 | 422 | A leg has no quote on its side and no `entry_price` was supplied | the instrument, and which side was empty |
 
@@ -279,3 +288,9 @@ represent a state in which there is nothing to draw. A status code says that onc
 transport, and the client's error path already exists.
 
 **No 502.** This route reads the chain cache or the local store and never calls Delta.
+
+**And no code at all for a response that breaches this contract.** A `forward` with no
+`discount`, or a leg carrying an `iv` with no Greeks, is refused by the models and leaves as a
+**500** — which is the honest answer, because that is our bug rather than a market condition.
+Inventing a refusal that meant "our own code is wrong" would let a real defect leave the
+building disguised as something the venue did.
