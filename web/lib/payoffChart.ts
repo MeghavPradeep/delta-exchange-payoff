@@ -130,14 +130,32 @@ export function verticalSpan(points: PayoffPoint[]): Span {
  *
  * **The focus keeps its place across the change** — the price under the pointer is still
  * under the pointer afterwards — which is the difference between zooming and scrolling.
- * Unlike the sibling's, the result is never slid back inside the data: see this file's
+ * Unlike the sibling's, the result is never slid back inside the *data*: see this file's
  * own header for why that rule does not survive the move to corner points.
+ *
+ * **The one wall is at zero, and it is not a limit on zooming.** A price is a
+ * non-negative quantity, so the axis has a domain and a window reaching left of zero
+ * would be drawing a region that cannot exist. The arithmetic behind the curve already
+ * agrees: the engine's own `_extremes` treats price 0 as a vertex, which is exactly why
+ * only the right-hand tail can ever be unbounded, and a chart that disagreed with that
+ * would be showing something its own numbers deny.
+ *
+ * The window is **slid, not truncated** — the width is the zoom level the reader chose,
+ * and narrowing it here would zoom them out by an amount they never asked for. So
+ * zooming out at the wall keeps widening, to the right; the reader is never stopped.
+ * That is the difference between this and the cap this file refuses to have: a reader
+ * who has zoomed out past usefulness can zoom back in, and a reader stopped at a cap
+ * cannot get past it.
+ *
+ * The two rules disagree at the wall — a focus close to zero cannot keep its place and
+ * also stay right of it — and the wall wins, for the reason the sibling's `zoom` gives
+ * for its own precedence: the alternative is drawing axis that means nothing.
  */
 export function zoomAbout(span: Span, factor: number, focus: number): Span {
   const width = span.max - span.min;
   const next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width * factor));
   const at = width > 0 ? (focus - span.min) / width : 0.5;
-  const min = focus - at * next;
+  const min = Math.max(0, focus - at * next);
   return { min, max: min + next };
 }
 

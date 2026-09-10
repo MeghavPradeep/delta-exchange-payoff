@@ -331,6 +331,43 @@ check("both breakevens are prices the drawn line really crosses zero at", () => 
   assert.equal(pnlAt(BUTTERFLY, 200000), -200);
 });
 
+console.log("\npayoffChart / the wall at zero — a price is a non-negative quantity");
+
+check("a zoom that would reach below zero slides to zero instead of crossing it", () => {
+  // 14,000 wide about the centre, twentyfold, is 280,000 wide: centred on 77,000 the
+  // left edge would be 77,000 - 140,000 = -63,000, which is not a price anything can
+  // finish at. Slid, not truncated: the width is the zoom the reader asked for.
+  const wide = zoomAbout({ min: 70000, max: 84000 }, 20, 77000);
+  assert.deepEqual(wide, { min: 0, max: 280000 });
+  assert.equal(wide.max - wide.min, 280000, "the chosen width survives the wall");
+});
+
+check("THE WALL IS NOT A CAP: zooming out again from the wall still widens", () => {
+  // The sibling cannot zoom out at all and this feature exists so that it can. The
+  // wall bounds the axis's domain, not the reader's gesture — the window keeps growing,
+  // it simply grows to the right.
+  const once = zoomAbout({ min: 70000, max: 84000 }, 20, 77000);
+  const twice = zoomAbout(once, 2, 140000);
+  assert.deepEqual(twice, { min: 0, max: 560000 });
+  assert.ok(twice.max - twice.min > once.max - once.min, "still widening");
+});
+
+check("no sequence of zooms puts a negative price on the axis", () => {
+  let span = { min: 70000, max: 84000 };
+  for (const factor of [4, 4, 4, 0.5, 8, 2]) {
+    span = zoomAbout(span, factor, span.min);
+    assert.ok(span.min >= 0, `left edge ${span.min}`);
+    assert.ok(span.max > span.min, "the window still has width");
+  }
+});
+
+check("a window nowhere near zero is untouched — the focus still stays put", () => {
+  assert.deepEqual(zoomAbout({ min: 70000, max: 84000 }, 0.5, 77000), {
+    min: 73500,
+    max: 80500,
+  });
+});
+
 if (failures > 0) {
   console.error(`\n${failures} failed`);
   process.exit(1);
