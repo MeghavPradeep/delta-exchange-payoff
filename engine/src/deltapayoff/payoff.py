@@ -160,10 +160,14 @@ def suggested_window(
 
     **+/-3 standard deviations, in log space**, around `anchor` — the forward where one
     was fitted, since that is what the terminal distribution is centred on, and spot
-    otherwise. `sigma * sqrt(years)` is the standard deviation of the log price, so the
-    ends are `anchor * exp(-/+3 sigma sqrt(t))`. Taking the three sigma in price terms
-    instead would put the low end below zero whenever `sigma * sqrt(t)` passes a third,
-    which is an ordinary 70%-volatility quarter here.
+    otherwise. The ends are `anchor * exp(-/+3 sigma sqrt(t))`, three deviations of the
+    **log** price, which is the quantity Black-76 models as normal. The additive reading
+    `anchor * (1 -/+ 3 sigma sqrt(t))` is the more literal one and is broken: it puts the
+    low edge below zero once `sigma * sqrt(t)` passes a third, an ordinary 82-day expiry
+    at the 37% volatility this chain runs at. `docs/payoff-contract.md` now says so too.
+
+    **No drift term.** No `- sigma^2 t / 2`: this is a viewing frame, not a probability
+    statement, and the correction would shift it without telling the reader anything.
 
     **A fixed percentage does not transfer.** At 37% volatility +/-6% is 1.6 sigma on a
     3.8-day expiry and 0.33 sigma at 86 days, where it would crop off the whole
