@@ -12,7 +12,9 @@
  *
  *   - Every decimal is a JSON `number` or `null`, never a string. Nothing in the web
  *     app parses a numeric string, so no field is typed `string | number`, and
- *     `assertPayoff` below refuses a payload that breaks it.
+ *     `assertPayoff` below refuses a payload that breaks it. **The rule binds the
+ *     response**: the engine parses a request leniently, so `AnalyseRequest` is the one
+ *     shape here that nothing guards.
  *   - **Unbounded is `null`** — never an infinity, never a large sentinel, never the
  *     string `"Unlimited"`. The screen renders the word; the wire carries the absence.
  *   - Every number is **per one unit of the underlying**. `contract_value` is echoed so
@@ -251,7 +253,7 @@ function offences(value: unknown, path: string, found: string[]): void {
  * Delta sends decimals as strings and the engine converts once, at the boundary. If one
  * gets through, nothing downstream would fail — `"1240.0"` sorts and scales as text, so
  * the line draws in the wrong place and the metrics under it read as plausible figures.
- * `contract.ts`'s `assertNumeric` does the same job for `/chain` and for the same
+ * `engine.ts`'s `assertNumeric` does the same job for `/chain` and for the same
  * reason; this one walks rather than lists, because the payoff response nests.
  *
  * `null` is never a breach. Unbounded is `null` and an absent observation is `null`,

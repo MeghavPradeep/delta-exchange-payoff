@@ -197,10 +197,11 @@ good trade.
 
 ### `table`
 
-The same quantity as `curve.corners` — `{price, pnl}`, strictly ascending — on the readable grid
-a trader takes exact figures off rather than inferring them from the picture. The same type as
-the corners deliberately: it is one quantity sampled twice, not two quantities, and they must
-agree wherever they share a price.
+The same quantity as `curve.corners` — `{price, pnl}`, strictly ascending, **never empty** — on
+the readable grid a trader takes exact figures off rather than inferring them from the picture.
+The same type as the corners deliberately: it is one quantity sampled twice, not two
+quantities, and they must agree wherever they share a price. A response holding three corners
+and an empty table is exactly the drift that shared type exists to prevent.
 
 ## Units
 
@@ -223,6 +224,12 @@ one that can lose everything.
 reaches the wire. The engine converts once, at the boundary; the web app never calls
 `parseFloat` and raises `ContractViolationError` if this is breached.
 
+**That rule binds the response.** The request is parsed **leniently**: `{"quantity": "3"}` and
+`{"entry_price": "1240.0"}` are coerced rather than refused. Strict request types would also
+refuse an honest `3` where a caller — or the pure core building a request in a test — naturally
+writes one, and the guarantee this contract exists to make is about what the engine *emits*,
+which is the half a browser cannot defend itself against.
+
 ## Refusals
 
 FastAPI's default shape, `{"detail": "..."}`.
@@ -231,7 +238,8 @@ FastAPI's default shape, `{"detail": "..."}`.
 |---|---|---|
 | 400 | A leg's `instrument` is not a canonical string | the string, and which of its six parts was wrong |
 | 404 | A leg's instrument is not listed on the chain being analysed | the instrument string |
-| 404 | There is no chain to price against — no live ladder yet, or a minute the store does not hold | the underlying, the expiry and the minute |
+| 404 | An `as_of` minute the store does not hold | the underlying, the expiry and the minute |
+| 503 | No live ladder yet — the chain cache has not warmed | the underlying and the expiry |
 | 422 | `legs` is empty | that `legs` must hold at least one leg |
 | 422 | The legs span more than one expiry | **both** expiries |
 | 422 | A leg has no quote on its side and no `entry_price` was supplied | the instrument, and which side was empty |
@@ -243,5 +251,27 @@ volatility. Calendar and diagonal spreads are #2.
 **A leg nobody is quoting is not disabled, it is asked about.** "What if I were filled at 900"
 is exactly the question an unquoted wing invites, so the refusal names the leg and the side and
 the trader types a price. Nothing is ever inferred from the other side of the strike.
+
+**Nothing to price against is two different facts, and they get two different codes.**
+
+A **stored minute the store does not hold** is a **404**, the code this engine already uses for
+a thing that does not exist — `/feeds/{adapter}/{command}` answers 404 for an adapter this
+process does not run, `/expiries` for an underlying the venue lists nothing for. Under the
+never-forward-fill rule a minute with no arrivals produces **no row at all**, so the minute
+genuinely does not exist and 404 is the honest code rather than a borrowed one.
+
+An **unwarmed live cache** is a **503**. The answer exists; it does not exist *yet*.
+`get_bar_writer` in `main.py` reasons exactly this for `/recording`: a process with no writer
+is not a process that is paused, it is one where the question has no answer, and answering with
+a default would state something untrue.
+
+**`/analyse` deliberately does not adopt `/chain/at`'s 200-with-`waiting`,** which is the
+disposition `/chain/at`, `/smile` and `/bars` all take for their own kind of nothing-yet. The
+difference is what the caller does with the answer. `/chain/at` feeds a screen that must render
+*something* while it waits, so a `waiting` envelope beside a `chain` envelope is what lets one
+component draw either. `/analyse` is a one-shot POST whose only product is an analysis: a
+waiting envelope would make every consumer branch on a union before it could draw anything, to
+represent a state in which there is nothing to draw. A status code says that once, at the
+transport, and the client's error path already exists.
 
 **No 502.** This route reads the chain cache or the local store and never calls Delta.

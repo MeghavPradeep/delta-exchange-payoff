@@ -301,7 +301,7 @@ class AnalyseResponse(_Contract):
     #: The same quantity as `curve.corners`, on the readable grid a trader takes exact
     #: figures off rather than inferring them from the picture. Strictly ascending, and
     #: the same type deliberately: one quantity sampled twice, not two quantities.
-    table: list[PayoffPoint]
+    table: list[PayoffPoint] = Field(min_length=1)
 
     @model_validator(mode="after")
     def _total_greeks_are_all_or_nothing(self) -> AnalyseResponse:
@@ -322,4 +322,26 @@ class AnalyseResponse(_Contract):
         """The same rule the corners obey, because it is the same quantity sampled
         twice rather than a second one."""
         _refuse_unless_ascending([row.price for row in self.table], "table")
+        return self
+
+    @model_validator(mode="after")
+    def _a_fit_is_whole_or_absent(self) -> AnalyseResponse:
+        """`forward` and `discount` come out of **one** fit, so one without the other is
+        half a fit reported as a whole one — and with no forward there is nothing to
+        invert a volatility against, so no leg may carry an `iv` or any Greeks either.
+
+        The third exactly-when on this contract, beside `iv`/`greeks` and `total_greeks`.
+        The curve and the metrics survive an unfitted chain, which is why this is a
+        nullable pair rather than a refusal.
+        """
+        if (self.forward is None) != (self.discount is None):
+            raise ValueError(
+                "forward and discount are published together or not at all; got "
+                f"forward={self.forward!r}, discount={self.discount!r}"
+            )
+        if self.forward is None and any(leg.iv is not None for leg in self.legs):
+            raise ValueError(
+                "a chain with no forward has nothing to invert a volatility against, "
+                "so no leg may carry an iv or greeks"
+            )
         return self

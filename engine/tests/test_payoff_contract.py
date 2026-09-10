@@ -366,3 +366,50 @@ def test_the_leg_does_not_second_guess_the_instrument_parser() -> None:
     with pytest.raises(InstrumentParseError):
         Instrument.from_canonical("DELTA-BTC-20260904-77000-C")
     assert Instrument.from_canonical(CALL).canonical() == CALL
+
+
+def test_the_forward_and_the_discount_are_null_together() -> None:
+    """`docs/payoff-contract.md`: they come out of one fit, so one without the other is
+    half a fit reported as a whole one. The third exactly-when on this contract, beside
+    `iv`/`greeks` and `total_greeks`."""
+    body = json.loads(WORKED_RESPONSE)
+    body["forward"] = None
+    with pytest.raises(ValidationError):
+        AnalyseResponse.model_validate(body)
+    body = json.loads(WORKED_RESPONSE)
+    body["discount"] = None
+    with pytest.raises(ValidationError):
+        AnalyseResponse.model_validate(body)
+
+
+def test_an_unfitted_chain_carries_no_volatility_anywhere() -> None:
+    """The other half of the same sentence: with no forward there is nothing to invert a
+    volatility against, so no leg may carry an `iv` or any Greeks.
+
+    The curve and the metrics survive it — a P&L at expiry is intrinsic value and a
+    subtraction — which is why this is a nullable pair rather than a refusal.
+    """
+    body = json.loads(WORKED_RESPONSE)
+    body["forward"] = None
+    body["discount"] = None
+    with pytest.raises(ValidationError):
+        AnalyseResponse.model_validate(body)
+
+    # ...and stripped of its volatility, the same response is legitimate.
+    body["legs"][0]["iv"] = None
+    body["legs"][0]["greeks"] = None
+    body["total_greeks"] = None
+    unfitted = AnalyseResponse.model_validate(body)
+    assert unfitted.metrics.breakevens == [78240.0]
+    prices = [corner.price for corner in unfitted.curve.corners]
+    assert prices == [74000.0, 77000.0, 81000.0]
+
+
+def test_a_response_with_a_curve_has_a_table_too() -> None:
+    """The corners and the table are one quantity sampled twice, so a response holding
+    three corners and an empty table is exactly the drift a shared type exists to
+    prevent."""
+    body = json.loads(WORKED_RESPONSE)
+    body["table"] = []
+    with pytest.raises(ValidationError):
+        AnalyseResponse.model_validate(body)
