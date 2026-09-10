@@ -118,3 +118,26 @@ export function decodeLegs(encoded: string | null | undefined): LegRequest[] {
   if (!encoded) return [];
   return encoded.split(",").map(decodeLeg);
 }
+
+/**
+ * The link the chain's Analyse button opens, in a new tab.
+ *
+ * Here rather than in `ChainScreen` because it is the third thing this file already
+ * knows: how a strategy is spelled in an address bar. Building it beside `encodeLegs`
+ * is what keeps the writer and the reader of that spelling in each other's sight, which
+ * is `lib/view.ts`'s own argument for keeping `parseView` and `viewQuery` together.
+ *
+ * **The minute travels with the strategy.** A tab opened from a stored minute has to
+ * stay at that minute — a historical reading that silently became a live one would be
+ * the same betrayal as opening on the wrong minute — and `null` is "live", the absence
+ * of a stamp rather than the newest one, exactly as on the chain screen.
+ *
+ * `:` and `,` are put back after `URLSearchParams` escapes them. Both are legal in a
+ * query string, and a link someone reads before clicking should show the strategy it
+ * opens rather than `%3A` and `%2C`.
+ */
+export function analyseHref(legs: LegRequest[], minute: string | null): string {
+  const params = new URLSearchParams({ legs: encodeLegs(legs) });
+  if (minute) params.set("minute", minute);
+  return `/analyse?${params.toString().replace(/%3A/g, ":").replace(/%2C/g, ",")}`;
+}

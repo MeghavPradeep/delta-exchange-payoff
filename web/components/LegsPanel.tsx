@@ -15,10 +15,17 @@ import type { LegRequest } from "@/lib/payoff";
  * this panel its own quantity box and its own remove control would be building half of
  * that early, in the one place the spec says editing does *not* live.
  *
+ * **Analyse is a link, and it opens a new tab.** P5 wired it: `target="_blank"` so the
+ * ladder behind it keeps streaming, which is user story 5 and the reason the payoff is
+ * a separate route rather than a panel on this one. An `<a>` rather than a button with
+ * a `window.open` — the address is a real address, so it should be copyable, openable
+ * in the background and visible on hover. `rel="noopener"` because a tab opened with
+ * `target="_blank"` can otherwise reach back through `window.opener`.
+ *
  * **Rendered only when there is at least one leg** — the caller (`ChainScreen`) does
  * not mount this component otherwise, so there is no empty state to design here.
  */
-export default function LegsPanel({ legs }: { legs: LegRequest[] }) {
+export default function LegsPanel({ legs, href }: { legs: LegRequest[]; href: string }) {
   return (
     <section className="legs-panel" aria-label="Strategy">
       <h2 className="legs-panel-title">
@@ -46,21 +53,15 @@ export default function LegsPanel({ legs }: { legs: LegRequest[] }) {
         })}
       </ul>
 
-      {/*
-        Review round 1, minor #4: a `title` on a **disabled** `<button>` never shows —
-        Chrome and Safari do not dispatch the pointer events a tooltip needs onto a
-        disabled control. Wrapping the button in a `<span>` puts the tooltip on an
-        element that *does* receive the hover, without making the button itself any
-        less disabled.
-      */}
-      <span
-        className="analyse-wrap"
-        title="Not wired yet — the analyse screen this opens is a later ticket (#6)."
+      <a
+        className="analyse"
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Opens the payoff in a new tab, so this ladder keeps streaming."
       >
-        <button type="button" className="analyse" disabled>
-          Analyse {legs.length} {legs.length === 1 ? "leg" : "legs"}
-        </button>
-      </span>
+        Analyse {legs.length} {legs.length === 1 ? "leg" : "legs"}
+      </a>
     </section>
   );
 }

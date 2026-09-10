@@ -1689,18 +1689,16 @@ td.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -
 .leg-quantity { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 .leg-label { color: var(--ink); }
 
-/* Review round 1, minor #4: the tooltip explaining "not wired yet" lives on this wrapper,
-   not on the `<button>` inside it — a disabled control does not dispatch the pointer
-   events a `title` tooltip needs, in Chrome or Safari, so put on the button itself it
-   was never reachable. `display: block` so the button still fills the panel's width. */
-.analyse-wrap { display: block; }
-
-/* Disabled until #6 wires `/analyse` — `opacity` rather than hiding, so the panel does
-   not jump when it becomes live. Same 0.35 the other three disabled controls on this
-   page use (`.refresh:disabled`, `.ivr-slider input:disabled`, `.ivr-number:disabled`) —
-   one dimming recipe, not a fourth invented here. */
+/* P5: no longer a disabled button but the link to `/analyse`, opened in a new tab so
+   the ladder behind it keeps streaming. Still shaped like the button it was — `display:
+   block` and `text-align: center` are what an `<a>` needs to fill the panel's width the
+   way the `<button>` did. */
 .analyse {
+  display: block;
   width: 100%;
+  box-sizing: border-box;
+  text-align: center;
+  text-decoration: none;
   border: 1px solid var(--line-strong);
   background: var(--surface);
   color: var(--ink);
@@ -1711,8 +1709,7 @@ td.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -
   font-weight: 600;
   cursor: pointer;
 }
-.analyse:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.analyse:disabled { opacity: 0.35; cursor: default; }
+.analyse:hover { border-color: var(--accent); color: var(--accent); }
 
 /* The B/S column, nearest the strike on both sides — `ChainLadder.tsx`'s own note on
    why. Same cell padding as every other column; the buttons fill it rather than the
@@ -1747,3 +1744,156 @@ td.picks { padding: 2px 6px; }
 .bs button.sell.on:hover { border-color: var(--down); color: var(--bg); }
 
 th.picks-head { text-align: center; }
+
+/* ------------------------------------------------------- P5: the analyse screen
+ *
+ * A new route rather than a panel on the chain, opened in its own tab, so the two
+ * screens share the shell, the header, the tabs strip and the notices and nothing else.
+ * Every colour below is a token already defined at the top of this file: amber for the
+ * one reference the eye should find first (the forward), the call/put green and red for
+ * profit and loss, and the warm greys for everything that is structure rather than data.
+ */
+
+.analyse-body { display: flex; align-items: flex-start; gap: var(--pad); padding: 0 var(--pad); }
+.analyse-main { flex: 1 1 auto; min-width: 0; }
+
+.analyse-side {
+  flex: none;
+  width: 300px;
+  position: sticky;
+  top: 0;
+}
+
+/* The unit toggle. In the header rather than over one table, because it governs every
+   money column and every Greek column on the screen at once. */
+.unit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.unit-toggle input { accent-color: var(--accent); cursor: pointer; }
+
+.payoff-chart {
+  margin: var(--pad) 0 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.payoff-chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px var(--pad);
+  border-bottom: 1px solid var(--line);
+}
+
+.payoff-zoom { display: inline-flex; gap: 4px; }
+.payoff-zoom button {
+  min-width: 26px;
+  height: 22px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  color: var(--ink-soft);
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.payoff-zoom button:hover { border-color: var(--accent); color: var(--accent); }
+
+.payoff-svg { display: block; width: 100%; height: auto; }
+
+/* The line itself, and the axis it is read against. The grid is quiet enough to be
+   ignored and the zero line is not, because zero is what every figure here is quoted
+   against — the same reason `verticalSpan` refuses to let it leave the window. */
+.payoff-grid { stroke: var(--line); stroke-width: 1; }
+.payoff-zero { stroke: var(--line-strong); stroke-width: 1.5; }
+.payoff-line { fill: none; stroke: var(--ink); stroke-width: 2; }
+.payoff-tick {
+  fill: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+/* The forward wears the accent: it is the one reference the reader should find first,
+   and it is the price the market implies for the date this curve is about. Spot is not
+   marked at all — the axis is the price at expiry, and spot is not on it. */
+.payoff-forward { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.payoff-forward-label { fill: var(--accent); font-family: var(--mono); font-size: 11px; }
+
+/* A breakeven is a fact about the line, not a reference the line is measured against,
+   so it is drawn quietly and dashed differently from the forward — told apart by the
+   pattern as well as by the hue, which survives a monochrome printout. */
+.payoff-breakeven { stroke: var(--ink-faint); stroke-width: 1; stroke-dasharray: 2 4; }
+.payoff-breakeven-label { fill: var(--ink-faint); font-family: var(--mono); font-size: 10px; }
+
+.metrics {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 12px;
+}
+.metrics-caption {
+  padding: 8px var(--pad);
+  text-align: left;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--line);
+}
+.metrics td { padding: 6px var(--pad); border-top: 1px solid var(--line); }
+.metrics td.num {
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.metrics-note { color: var(--ink-faint); font-size: 10px; text-transform: uppercase; }
+
+/* The two tables under the tabs. One recipe, because they are the same kind of thing:
+   rows of figures read down a column. */
+.grid {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: var(--pad);
+  font-size: 12px;
+}
+.grid th {
+  text-align: right;
+  padding: 6px 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: var(--ink-faint);
+  border-bottom: 1px solid var(--line-strong);
+  font-weight: 600;
+}
+.grid th:first-child { text-align: left; }
+.grid td { padding: 5px 10px; border-bottom: 1px solid var(--line); }
+.grid td.num {
+  text-align: right;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.grid tr.total td { border-top: 1px solid var(--line-strong); font-weight: 700; }
+/* The row nearest the forward on the payoff table — the same wash the ladder uses for
+   the at-the-money row, so one colour means one thing across both screens. */
+.grid tr.here td { background: var(--atm); }
+
+.gain { color: var(--call); }
+.loss { color: var(--put); }
+
+/* The tabs strip and the prose under it sit inside `.analyse-body`, which already
+   carries the page's horizontal padding — without these two overrides both would be
+   indented twice and would not line up with the chart above them. */
+.analyse-main .tabs { padding: 0; }
+.analyse-main .note { margin-left: 0; margin-right: 0; }
+.analyse-side .note { margin-left: 0; margin-right: 0; }

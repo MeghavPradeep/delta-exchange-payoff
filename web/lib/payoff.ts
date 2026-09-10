@@ -270,3 +270,54 @@ export function assertPayoff(response: AnalyseResponse): void {
     );
   }
 }
+
+/**
+ * One entry of FastAPI's request-validation envelope.
+ *
+ * Mirrored because the shape is part of the contract, not an implementation detail of
+ * the framework: `docs/payoff-contract.md` §Refusals fixes it as the envelope the
+ * **schema** refusal arrives in, and names the fields a reader has to be shown.
+ */
+export interface ValidationEntry {
+  type: string;
+  /** `["body", "legs"]` — the path to the field that was wrong, outermost first. */
+  loc: (string | number)[];
+  msg: string;
+}
+
+/**
+ * A refusal's `detail`, whichever of the **two envelopes** it arrived in, as one
+ * sentence — or `null` when the body carries no `detail` at all.
+ *
+ * `docs/payoff-contract.md` §Refusals: seven of the eight refusals are **semantic** —
+ * the request is well formed and the engine will not answer it — and travel as
+ * FastAPI's default `{"detail": "..."}`, a string. The eighth is a **schema** breach,
+ * caught by `AnalyseRequest` itself before the route is entered, so it arrives as
+ * `{"detail": [{...}]}`, a **list**. That split lives on the type on purpose — the pure
+ * core builds these models directly, so the type is what stops a core-side bug
+ * producing an empty strategy — and the consequence is that a client reading `detail`
+ * must expect either shape.
+ *
+ * `lib/contract.ts`'s `isEngineError` handles only the string, which is right for
+ * `/chain`: none of its refusals are schema breaches. Widening it would loosen the
+ * guard on every route to serve one, so the second shape is read here, beside the
+ * contract that produces it.
+ *
+ * A list is rendered as `body.legs: List should have at least 1 item` rather than as
+ * the raw object — a screen that prints `[object Object]` at a trader has told them
+ * nothing, which is the whole failure this function exists to prevent.
+ */
+export function refusalDetail(body: unknown): string | null {
+  if (typeof body !== "object" || body === null) return null;
+  const detail = (body as { detail?: unknown }).detail;
+  if (typeof detail === "string") return detail;
+  if (!Array.isArray(detail) || detail.length === 0) return null;
+  return detail
+    .map((entry) => {
+      const { loc, msg } = entry as Partial<ValidationEntry>;
+      const where = Array.isArray(loc) ? loc.join(".") : "";
+      const what = typeof msg === "string" ? msg : JSON.stringify(entry);
+      return where ? `${where}: ${what}` : what;
+    })
+    .join("; ");
+}

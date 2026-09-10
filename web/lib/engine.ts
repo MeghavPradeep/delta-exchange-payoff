@@ -19,6 +19,13 @@ import {
   type Underlying,
 } from "./contract";
 import { FIXTURE_CHAIN, fixtureChain, fixtureExpiries, fixtureSmile } from "./fixture";
+import {
+  assertPayoff,
+  refusalDetail,
+  type AnalyseRequest,
+  type AnalyseResponse,
+  type LegRequest,
+} from "./payoff";
 
 export const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL ?? "http://localhost:8000";
 
@@ -393,4 +400,61 @@ export async function setRecording(recording: boolean): Promise<RecordingState> 
     );
   }
   return body as RecordingState;
+}
+
+/**
+ * The strategy, analysed. `POST /analyse`, `docs/payoff-contract.md`.
+ *
+ * **No fixture fallback**, and for `loadChainMinutes`'s reason: there is no such thing
+ * as a fixture analysis of *this* strategy. Inventing one would draw a curve for a
+ * position nobody holds, with nothing on the page saying so — worse than the error the
+ * screen already knows how to show.
+ *
+ * `as_of` absent means **live** and is left off the body rather than sent as `null`, so
+ * the request the engine receives is the one the contract's own example spells. Present,
+ * it is a stored minute and the answer never moves.
+ *
+ * **`assertPayoff` runs here**, the same relationship `loadChain` has with
+ * `assertNumeric` and for the same reason: a decimal arriving as a string would not
+ * throw on a chart, it would sort and scale as text and draw a plausible, wrong line
+ * with plausible, wrong metrics underneath it.
+ *
+ * Both refusal envelopes are read through `refusalDetail` — see its own docstring, and
+ * §Refusals of the contract, for why there are two.
+ */
+export async function postAnalyse(
+  legs: LegRequest[],
+  asOf: string | null,
+): Promise<AnalyseResponse> {
+  const body: AnalyseRequest = asOf === null ? { legs } : { legs, as_of: asOf };
+
+  let res: Response;
+  try {
+    res = await fetch(`${ENGINE_URL}/analyse`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+  } catch (cause) {
+    throw new EngineUnreachableError(cause);
+  }
+
+  let payload: unknown;
+  try {
+    payload = await res.json();
+  } catch {
+    throw new EngineResponseError(res.status, `${res.status} ${res.statusText}: body was not JSON`);
+  }
+
+  if (!res.ok) {
+    throw new EngineResponseError(
+      res.status,
+      refusalDetail(payload) ?? `${res.status} ${res.statusText}`,
+    );
+  }
+
+  const analysis = payload as AnalyseResponse;
+  assertPayoff(analysis);
+  return analysis;
 }

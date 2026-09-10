@@ -18,7 +18,7 @@ import {
 import { ENGINE_URL, loadChainAt, loadChainMinutes, loadExpiries } from "@/lib/engine";
 import { looksCanonical } from "@/lib/instrument";
 import { addLeg, dropFirst, heldAt } from "@/lib/legs";
-import { LegsUrlError, decodeLegs, encodeLegs } from "@/lib/legs-url";
+import { LegsUrlError, analyseHref, decodeLegs, encodeLegs } from "@/lib/legs-url";
 import {
   feedBadge,
   LIVE_STATUS_LABEL,
@@ -584,7 +584,9 @@ export default function ChainScreen({
 
           {legs.length > 0 || panelInstrument ? (
             <aside className="chain-side">
-              {legs.length > 0 ? <LegsPanel legs={legs} /> : null}
+              {legs.length > 0 ? (
+                <LegsPanel legs={legs} href={analyseHref(legs, following ? null : stamp)} />
+              ) : null}
               {panelInstrument ? (
                 <ContractPanel
                   key={panelInstrument}
