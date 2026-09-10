@@ -1618,3 +1618,124 @@ td.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -
 .contract-chart { width: 100%; height: 360px; }
 
 .contract-panel .note { padding: 10px var(--pad) 14px; margin: 0; }
+
+/* ------------------------------------------------------- P4: picking legs */
+
+/*
+ * The ladder plus its right-hand column. A plain flex row, not a scroll container of
+ * its own: `.chain-wrap`'s overflow is untouched, so the sticky header keeps sticking
+ * to `.main` exactly as it did before this ticket, and the ladder can still run wider
+ * than the viewport — nineteen columns becoming twenty-one, now beside a 320px aside
+ * rather than above a full-width one. `.chain-side` is a flex sibling rather than a
+ * second scroll pane for that reason — a table wide enough to need its own horizontal
+ * scroll would need this redesigned properly, which is a controller's call, not a CSS
+ * tweak made in passing.
+ */
+.chain-body { display: flex; align-items: flex-start; gap: var(--pad); }
+.chain-main { flex: 1 1 auto; min-width: 0; }
+
+.chain-side {
+  flex: none;
+  width: 320px;
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad);
+}
+
+.legs-panel {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 10px var(--pad) var(--pad);
+}
+
+.legs-panel-title {
+  margin: 0 0 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: var(--ink-faint);
+  font-weight: 600;
+}
+
+.legs-list { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+
+.leg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+/* Bought green, sold red — the same `--up`/`--down` pair the bid/ask arrows use, not
+   `--call`/`--put`: those name which *side* a leg is, and reusing them here would make
+   a sold put look like a call. */
+.leg-direction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius);
+  font-weight: 700;
+  font-size: 11px;
+}
+.leg-direction.b { background: color-mix(in srgb, var(--up) 22%, transparent); color: var(--up); }
+.leg-direction.s { background: color-mix(in srgb, var(--down) 22%, transparent); color: var(--down); }
+
+.leg-quantity { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.leg-label { color: var(--ink); }
+
+/* Disabled until #6 wires `/analyse` — `opacity` rather than hiding, so its title
+   ("not wired yet") is reachable and the panel does not jump when it becomes live. */
+.analyse {
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: var(--radius);
+  padding: 7px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.analyse:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.analyse:disabled { opacity: 0.4; cursor: default; }
+
+/* The B/S column, nearest the strike on both sides — `ChainLadder.tsx`'s own note on
+   why. Same cell padding as every other column; the buttons fill it rather than the
+   text sizing the row. */
+td.picks { padding: 2px 6px; }
+
+.bs { display: inline-flex; gap: 3px; }
+
+.bs button {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  color: var(--ink-soft);
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.bs button:hover { border-color: var(--accent); color: var(--accent); }
+.bs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Lit — this exact contract, traded this way, is in the strategy. Filled rather than
+   outlined, so a held leg reads at a glance down a column of otherwise-identical
+   buttons, the same "hover treatment made permanent" idiom the sibling project uses. */
+.bs button.buy.on { background: var(--up); border-color: var(--up); color: var(--bg); }
+.bs button.sell.on { background: var(--down); border-color: var(--down); color: var(--bg); }
+.bs button.buy.on:hover { border-color: var(--up); color: var(--bg); }
+.bs button.sell.on:hover { border-color: var(--down); color: var(--bg); }
+
+th.picks-head { text-align: center; }

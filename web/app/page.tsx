@@ -27,6 +27,12 @@ function firstParam(value: string | string[] | undefined): string | null {
  * malformed or truncated value is treated as absent — `looksCanonical` rather than the
  * engine's own strict parse — so a mistyped link opens the chain page cleanly rather than
  * with a panel stuck trying to load nothing.
+ *
+ * **`legs` is passed through raw, undecoded.** P4's own rule is the opposite of
+ * `instrument`'s: a malformed strategy link must not be treated as absent, `lib/legs-
+ * url.ts`'s whole reason to throw naming the part that was wrong rather than silently
+ * skip it. A server component has no notice to show that failure into, so the decode —
+ * and the loud message when it fails — happens in `ChainScreen`, which does.
  */
 export default async function ChainPage({
   searchParams,
@@ -37,5 +43,12 @@ export default async function ChainPage({
   const initial = parseView(params);
   const instrument = firstParam(params.instrument);
   const initialInstrument = instrument && looksCanonical(instrument) ? instrument : null;
-  return <ChainScreen initial={initial} initialInstrument={initialInstrument} />;
+  const initialLegsParam = firstParam(params.legs);
+  return (
+    <ChainScreen
+      initial={initial}
+      initialInstrument={initialInstrument}
+      initialLegsParam={initialLegsParam}
+    />
+  );
 }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ChainLadder } from "@/components/ChainLadder";
 import ContractPanel from "@/components/ContractPanel";
+import LegsPanel from "@/components/LegsPanel";
 import RecordingToggle from "@/components/RecordingToggle";
 import ThemeToggle from "@/components/ThemeToggle";
 import TimeScrubber from "@/components/TimeScrubber";
@@ -16,6 +17,8 @@ import {
 } from "@/lib/contract";
 import { ENGINE_URL, loadChainAt, loadChainMinutes, loadExpiries } from "@/lib/engine";
 import { looksCanonical } from "@/lib/instrument";
+import { addLeg, dropFirst, heldAt } from "@/lib/legs";
+import { LegsUrlError, decodeLegs, encodeLegs } from "@/lib/legs-url";
 import {
   feedBadge,
   LIVE_STATUS_LABEL,
@@ -24,6 +27,7 @@ import {
   type LiveStatus,
 } from "@/lib/live";
 import { formatFetchedAt, formatFetchedClock, formatSpot } from "@/lib/format";
+import type { Direction as LegDirection, LegRequest } from "@/lib/payoff";
 import { positionOf } from "@/lib/position";
 import { clampIndex, lastIndex } from "@/lib/timeline";
 import type { ViewRequest } from "@/lib/view";
@@ -44,19 +48,23 @@ function todayUtc(): string {
 
 /**
  * `?underlying=BTC&expiry=04-09-2026` live, `&minute=...` added standing anywhere else,
- * `&instrument=...` added whenever the chart panel is open. `lib/view.ts`'s `viewQuery`
- * was not reused: that one always writes a minute, and "live" here is the absence of one
- * rather than a stamp that happens to be the newest.
+ * `&instrument=...` added whenever the chart panel is open, `&legs=...` added whenever
+ * the strategy is non-empty. `lib/view.ts`'s `viewQuery` was not reused: that one always
+ * writes a minute, and "live" here is the absence of one rather than a stamp that
+ * happens to be the newest.
  */
 function chainQuery(
   underlying: Underlying,
   expiry: string,
   minute: string | null,
   instrument: string | null,
+  legs: LegRequest[],
 ): string {
   const params = new URLSearchParams({ underlying, expiry });
   if (minute) params.set("minute", minute);
   if (instrument) params.set("instrument", instrument);
+  const encoded = encodeLegs(legs);
+  if (encoded) params.set("legs", encoded);
   return `?${params.toString().replace(/%3A/g, ":")}`;
 }
 
@@ -90,11 +98,21 @@ function chainQuery(
 export default function ChainScreen({
   initial,
   initialInstrument,
+  initialLegsParam,
 }: {
   initial: ViewRequest;
   /** #46: the canonical instrument string the URL carried on load, or `null`. Read by
    * `app/page.tsx` separately from `initial` — see that file's comment on why. */
   initialInstrument: string | null;
+  /**
+   * P4: the raw `legs=` query value, undecoded. Decoded here rather than in
+   * `app/page.tsx` — unlike `initialInstrument`'s lenient `looksCanonical` gate, a
+   * malformed strategy link is not treated as absent (`lib/legs-url.ts`'s whole reason
+   * to exist), so decoding it has to happen somewhere that can show the reader a loud
+   * notice rather than silently rendering an empty panel. A server component has no
+   * such notice to show into.
+   */
+  initialLegsParam: string | null;
 }) {
   const [underlying, setUnderlying] = useState<Underlying>(initial.underlying ?? "BTC");
   const [expiries, setExpiries] = useState<string[]>([]);
@@ -126,6 +144,29 @@ export default function ChainScreen({
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  /**
+   * P4: the strategy, decoded once from the link that opened this page. A malformed
+   * `legs=` is never treated as "no strategy" — `decodeLegs` throws naming the part
+   * that was wrong, and that message is what `legsError` carries onto the screen below,
+   * loudly, rather than quietly starting the reader on an empty position their link did
+   * not ask for.
+   */
+  const [legs, setLegs] = useState<LegRequest[]>(() => {
+    try {
+      return decodeLegs(initialLegsParam);
+    } catch {
+      return [];
+    }
+  });
+  const [legsError] = useState<string | null>(() => {
+    try {
+      decodeLegs(initialLegsParam);
+      return null;
+    } catch (err) {
+      return err instanceof LegsUrlError ? err.message : message(err);
+    }
+  });
 
   /** #46: the contract chart panel. `null` means closed. Seeded from the URL so a link
    * carrying a contract opens straight onto its chart, as `docs/bars-contract.md`'s own
@@ -269,13 +310,13 @@ export default function ChainScreen({
   // mean "live", which is what the reader is looking at, not the last sealed minute.
   useEffect(() => {
     if (!expiry) return;
-    const query = chainQuery(underlying, expiry, following ? null : stamp, panelInstrument);
+    const query = chainQuery(underlying, expiry, following ? null : stamp, panelInstrument, legs);
     if (window.location.search === query) return;
     const timer = window.setTimeout(() => {
       window.history.replaceState(null, "", query);
     }, URL_SETTLE_MS);
     return () => window.clearTimeout(timer);
-  }, [underlying, expiry, following, stamp, panelInstrument]);
+  }, [underlying, expiry, following, stamp, panelInstrument, legs]);
 
   const pickUnderlying = (next: Underlying) => {
     setUnderlying(next);
@@ -283,12 +324,34 @@ export default function ChainScreen({
     // A contract from the old underlying's chain has no row on the new one; open panel,
     // wrong ladder underneath it is worse than a closed one.
     setPanelInstrument(null);
+    // Every leg names an instrument on the old underlying's chain — #2's "one expiry
+    // per strategy" refusal is about two expiries of the *same* underlying and does not
+    // even apply across two different underlyings, so there is no series here to carry.
+    setLegs([]);
   };
 
   const pickExpiry = (next: string) => {
     setExpiry(next);
     setWanted(null);
     setPanelInstrument(null);
+    // A leg names its own expiry inside its instrument string; picking a different one
+    // here would leave the strategy pointed at contracts no longer on this ladder.
+    setLegs([]);
+  };
+
+  /**
+   * B and S both add and remove, depending on what is already held — `lib/legs.ts`'s
+   * `heldAt`/`addLeg`/`dropFirst`, the same pure functions the DOM fingerprint test
+   * pins. The button lights when the contract beside it is in the strategy, so clicking
+   * a lit one has to take it back off; it removes **one** matching leg, so a two-lot
+   * position built by clicking B twice comes off with two clicks rather than one.
+   */
+  const pickLeg = (instrument: string, direction: LegDirection) => {
+    setLegs((current) =>
+      heldAt(current, instrument, direction)
+        ? dropFirst(current, instrument, direction)
+        : addLeg(current, instrument, direction),
+    );
   };
 
   /** Where the scrubber puts the view. Standing on the right edge is spelled `null` —
@@ -441,34 +504,63 @@ export default function ChainScreen({
 
         {error ? <p className="notice error">{error}</p> : null}
 
-        {chain ? (
-          <ChainLadder
-            key={`${chain.underlying}:${chain.expiry}`}
-            chain={chain}
-            onSelectContract={setPanelInstrument}
-          />
-        ) : error || (following && liveStatus === "error") || historicalWaiting ? null : (
-          <p className="notice">
-            {historicalBusy
-              ? "Reading the stored ladder…"
-              : following && liveStatus === "waiting"
-                ? "Connected. Waiting for the first quotes on this expiry…"
-                : "Connecting to the engine…"}
+        {legsError ? (
+          <p className="notice error">
+            The strategy link could not be read: {legsError}. Starting with no legs
+            rather than guessing which ones were meant.
           </p>
-        )}
+        ) : null}
+
+        {/*
+          The ladder (or its status notice) in the growing column, the legs panel and
+          the #46 chart in a fixed-width one beside it — **unconditionally paired**, so
+          the chart panel's own visibility stays exactly what it was before this ticket
+          (driven only by `panelInstrument`, never by whether the ladder has finished
+          loading). Nesting the aside inside the `chain ?` branch below would make a
+          chart opened from a stale link disappear the instant the reader dragged the
+          slider onto a minute the ladder is still fetching — a regression this ticket
+          does not intend and the DOM fingerprint test does not reach, since it renders
+          `ChainLadder` alone.
+        */}
+        <div className="chain-body">
+          <div className="chain-main">
+            {chain ? (
+              <ChainLadder
+                key={`${chain.underlying}:${chain.expiry}`}
+                chain={chain}
+                onSelectContract={setPanelInstrument}
+                legs={legs}
+                onPick={pickLeg}
+              />
+            ) : error || (following && liveStatus === "error") || historicalWaiting ? null : (
+              <p className="notice">
+                {historicalBusy
+                  ? "Reading the stored ladder…"
+                  : following && liveStatus === "waiting"
+                    ? "Connected. Waiting for the first quotes on this expiry…"
+                    : "Connecting to the engine…"}
+              </p>
+            )}
+          </div>
+
+          {legs.length > 0 || panelInstrument ? (
+            <aside className="chain-side">
+              {legs.length > 0 ? <LegsPanel legs={legs} /> : null}
+              {panelInstrument ? (
+                <ContractPanel
+                  key={panelInstrument}
+                  instrument={panelInstrument}
+                  date={date}
+                  liveChain={liveChain}
+                  following={following}
+                  onClose={() => setPanelInstrument(null)}
+                />
+              ) : null}
+            </aside>
+          ) : null}
+        </div>
 
         <TimeScrubber timeline={timeline} index={index} onChange={pickIndex} />
-
-        {panelInstrument ? (
-          <ContractPanel
-            key={panelInstrument}
-            instrument={panelInstrument}
-            date={date}
-            liveChain={liveChain}
-            following={following}
-            onClose={() => setPanelInstrument(null)}
-          />
-        ) : null}
 
         <p className="note">
           A hatched half means that side is not listed at this strike. An empty cell means the
