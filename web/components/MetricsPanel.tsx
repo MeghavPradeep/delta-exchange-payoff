@@ -34,13 +34,25 @@ export default function MetricsPanel({
   unit: string;
 }) {
   const scaled = (value: number | null) => (value === null ? null : value * factor);
-  const credit = metrics.net_premium < 0;
 
+  /* Three states, not two. `Math.abs` below takes the sign off the number, so this word
+     is carrying the whole distinction — and at exactly zero there is no distinction to
+     carry. A costless structure labelled `0.00 debit` states something untrue about
+     which way the money moved, which is precisely the failure the word exists to
+     prevent. */
+  const flow =
+    metrics.net_premium < 0 ? "credit" : metrics.net_premium > 0 ? "debit" : null;
+
+  /* A `<section>` around the table rather than a `<caption>` inside it, and the frame is
+     on the section. `border-radius` on a `border-collapse: collapse` table is a no-op —
+     the panel would read square beside the chart's rounded frame — and a `<caption>` is
+     laid out outside the table's border box, so neither the corner nor the heading was
+     going to sit where it looked like it would. `.legs-panel` on the chain screen is
+     already a section, a heading and a body; this is that recipe, not a second one. */
   return (
-    <table className="metrics">
-      <caption className="metrics-caption">
-        At expiry, in <strong>{unit}</strong>
-      </caption>
+    <section className="metrics-panel" aria-label="Metrics">
+      <h2 className="metrics-title">At expiry — {unit}</h2>
+      <table className="metrics">
       <tbody>
         <tr>
           <td>Max profit</td>
@@ -61,8 +73,13 @@ export default function MetricsPanel({
         <tr>
           <td>Net premium</td>
           <td className="num">
-            {formatScaled(Math.abs(metrics.net_premium) * factor)}{" "}
-            <span className="metrics-note">{credit ? "credit" : "debit"}</span>
+            {formatScaled(Math.abs(metrics.net_premium) * factor)}
+            {flow === null ? null : (
+              <>
+                {" "}
+                <span className="metrics-note">{flow}</span>
+              </>
+            )}
           </td>
         </tr>
         <tr>
@@ -72,6 +89,7 @@ export default function MetricsPanel({
           </td>
         </tr>
       </tbody>
-    </table>
+      </table>
+    </section>
   );
 }

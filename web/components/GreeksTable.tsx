@@ -5,6 +5,40 @@ import type { AnalysedLeg, Greeks } from "@/lib/payoff";
 const NAMES: (keyof Greeks)[] = ["delta", "gamma", "vega", "theta", "rho"];
 
 /**
+ * Gamma is scaled by ten thousand and the header says so; the other four are not.
+ *
+ * **`formatGamma`'s reason, and the ladder's own convention.** Gamma runs several orders
+ * of magnitude below every other Greek — around 0.000086 on a BTC chain — so at two
+ * decimals the whole column reads `0.00`, which claims there is no convexity anywhere.
+ * That is the same lie `formatIv` refuses to tell about a floored volatility.
+ *
+ * It matters more here than on the ladder, because this screen's default state applies
+ * the lot size as well: 0.0000312 per underlying is 3.12e-8 per contract, which fell
+ * through `formatScaled` into **scientific notation** in the state the screen opens in.
+ * Scaling by 10⁴ puts it back on the same footing as the other four.
+ *
+ * **Not a new number format invented for this screen.** The ladder already solves this
+ * exact problem this exact way, and the two screens sit behind one another — a reader
+ * moving between them must not meet two conventions for one quantity.
+ */
+const SCALE: Record<keyof Greeks, number> = {
+  delta: 1,
+  gamma: 10_000,
+  vega: 1,
+  theta: 1,
+  rho: 1,
+};
+
+/** The column heads, with gamma's scale spelled into its own. */
+const HEAD: Record<keyof Greeks, string> = {
+  delta: "Δ",
+  gamma: "Γ ×10⁴",
+  vega: "ν",
+  theta: "Θ",
+  rho: "ρ",
+};
+
+/**
  * One row per leg, in the order they were sent, and a total when there is one.
  *
  * **Nothing here signs or scales a Greek.** `docs/payoff-contract.md`: the per-leg rows
@@ -45,13 +79,20 @@ export default function GreeksTable({
         <tr>
           <th>Leg</th>
           <th title="Implied volatility this leg's Greeks were computed at.">IV</th>
-          <th title="Delta, with respect to the forward, undiscounted.">Δ ({unit})</th>
-          <th title="Gamma, undiscounted.">Γ ({unit})</th>
-          <th title="Vega, discounted, per one percent of volatility.">ν ({unit})</th>
-          <th title="Theta, one calendar day on ACT/365 — crypto trades weekends.">
-            Θ ({unit})
+          <th title="Delta, with respect to the forward, undiscounted.">
+            {HEAD.delta} ({unit})
           </th>
-          <th title="Rho, discounted, per one percent.">ρ ({unit})</th>
+          <th title="Gamma, undiscounted, scaled by 10,000 so it is readable — the same
+                     scaling the ladder's own gamma column uses.">
+            {HEAD.gamma} ({unit})
+          </th>
+          <th title="Vega, discounted, per one percent of volatility.">
+            {HEAD.vega} ({unit})
+          </th>
+          <th title="Theta, one calendar day on ACT/365 — crypto trades weekends.">
+            {HEAD.theta} ({unit})
+          </th>
+          <th title="Rho, discounted, per one percent.">{HEAD.rho} ({unit})</th>
         </tr>
       </thead>
       <tbody>
@@ -74,7 +115,9 @@ export default function GreeksTable({
               <td className="num">{formatIv(leg.iv)}</td>
               {NAMES.map((name) => (
                 <td key={name} className="num">
-                  {formatScaled(leg.greeks === null ? null : leg.greeks[name] * factor)}
+                  {formatScaled(
+                    leg.greeks === null ? null : leg.greeks[name] * factor * SCALE[name],
+                  )}
                 </td>
               ))}
             </tr>
@@ -86,7 +129,7 @@ export default function GreeksTable({
             <td className="num" />
             {NAMES.map((name) => (
               <td key={name} className="num">
-                {formatScaled(total[name] * factor)}
+                {formatScaled(total[name] * factor * SCALE[name])}
               </td>
             ))}
           </tr>

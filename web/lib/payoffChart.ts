@@ -46,6 +46,62 @@ export interface Span {
 const MIN_WIDTH = 0.01;
 const MAX_WIDTH = 1e12;
 
+/*
+ * The frame, in SVG units. The `viewBox` scales these to whatever width the chart is
+ * given, so they are proportions rather than pixels.
+ *
+ * **They live here rather than in the component because they are geometry**, and the one
+ * thing that needs them — turning a pointer position into a price — was the last piece of
+ * arithmetic left in the component and therefore the only piece with no test.
+ * `renderToStaticMarkup` never runs an effect, so a wheel handler cannot be covered from
+ * a DOM fingerprint by construction; hand-checking `priceAtPointer` is the only kind of
+ * check this environment offers, and it only becomes possible once the layout is a value
+ * rather than a constant private to the markup.
+ */
+export const PLOT_LEFT = 68;
+export const PLOT_TOP = 14;
+export const PLOT_RIGHT = 16;
+export const PLOT_BOTTOM = 26;
+export const PLOT_WIDTH = 880;
+export const PLOT_HEIGHT = 320;
+export const VIEWBOX_WIDTH = PLOT_LEFT + PLOT_WIDTH + PLOT_RIGHT;
+export const VIEWBOX_HEIGHT = PLOT_TOP + PLOT_HEIGHT + PLOT_BOTTOM;
+
+/**
+ * The price under the pointer — what a wheel event zooms about.
+ *
+ * Three coordinate systems meet here and getting them confused is silent: the pointer
+ * arrives in **client pixels**, the element is measured in **CSS pixels** by
+ * `getBoundingClientRect`, and the plot is laid out in **viewBox units** and is inset
+ * from the element by `PLOT_LEFT` on one side and `PLOT_RIGHT` on the other. Reading the
+ * fraction across the *element* as the fraction across the *plot* displaces the focus
+ * right by `PLOT_LEFT / VIEWBOX_WIDTH` — 7.05% of the window — and because each event
+ * then zooms about a price to the right of the one being pointed at, **the error
+ * compounds across a gesture** rather than staying a fixed offset.
+ *
+ * That matters more than a small displacement would, because "the price under the
+ * pointer stays put" is the entire justification for this chart hand-registering a
+ * non-passive wheel listener at all.
+ *
+ * The gutter where the axis labels live is **clamped to the plot's edges** rather than
+ * extrapolated past them: it is not part of the window, and zooming about a price
+ * outside the window would move the curve out from under the pointer in the other
+ * direction.
+ */
+export function priceAtPointer(
+  span: Span,
+  clientX: number,
+  boxLeft: number,
+  boxWidth: number,
+): number {
+  // Before layout, or on a hidden element. The centre is the only honest answer, and it
+  // is what the +/- buttons already zoom about.
+  if (!(boxWidth > 0)) return span.min + (span.max - span.min) / 2;
+  const units = ((clientX - boxLeft) / boxWidth) * VIEWBOX_WIDTH;
+  const plotX = Math.min(PLOT_WIDTH, Math.max(0, units - PLOT_LEFT));
+  return span.min + (plotX / PLOT_WIDTH) * (span.max - span.min);
+}
+
 /** The window the engine suggested opening on, which is what Reset returns to. */
 export function engineSpan(window: Window): Span {
   return { min: window.low, max: window.high };

@@ -1,10 +1,6 @@
 import ChainScreen from "@/components/ChainScreen";
 import { looksCanonical } from "@/lib/instrument";
-import { parseView } from "@/lib/view";
-
-function firstParam(value: string | string[] | undefined): string | null {
-  return Array.isArray(value) ? (value[0] ?? null) : (value ?? null);
-}
+import { firstParam, parseView } from "@/lib/view";
 
 /**
  * The chain route.

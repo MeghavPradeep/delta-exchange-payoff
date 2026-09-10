@@ -21,7 +21,7 @@
  *     the screen can multiply money and Greeks together at the very end. The engine
  *     never multiplies.
  */
-import { ContractViolationError } from "./engine";
+import { ContractViolationError } from "./engine-errors";
 
 /** Bought (`1`) or sold (`-1`). Never one signed quantity — the sign and the size are
  * separate fields, so nothing can render a negative quantity. */

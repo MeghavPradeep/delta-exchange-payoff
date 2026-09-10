@@ -1833,24 +1833,34 @@ th.picks-head { text-align: center; }
 .payoff-breakeven { stroke: var(--ink-faint); stroke-width: 1; stroke-dasharray: 2 4; }
 .payoff-breakeven-label { fill: var(--ink-faint); font-family: var(--mono); font-size: 10px; }
 
-.metrics {
-  width: 100%;
-  border-collapse: collapse;
+/* The frame is on the section, not on the table. `border-radius` on a
+   `border-collapse: collapse` table is a no-op, so the panel used to read square beside
+   the chart's rounded frame — and a `<caption>` is laid out outside the table's border
+   box, so the heading was not inside the frame either. Same three-part recipe as
+   `.legs-panel` on the chain screen rather than a second one invented here. */
+.metrics-panel {
   border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   background: var(--surface);
-  font-size: 12px;
+  padding: 10px var(--pad) var(--pad);
 }
-.metrics-caption {
-  padding: 8px var(--pad);
-  text-align: left;
-  font-size: 10px;
+
+.metrics-title {
+  margin: 0 0 8px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.11em;
   color: var(--ink-faint);
-  border-bottom: 1px solid var(--line);
+  font-weight: 600;
 }
-.metrics td { padding: 6px var(--pad); border-top: 1px solid var(--line); }
+
+.metrics {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.metrics td { padding: 6px 0; border-top: 1px solid var(--line); }
+.metrics tr:first-child td { border-top: 0; }
 .metrics td.num {
   text-align: right;
   font-family: var(--mono);

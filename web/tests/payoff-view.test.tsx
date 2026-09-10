@@ -117,6 +117,17 @@ check("THE MULTIPLIER: per contract, 1,400 of credit is 1.40 of credit", () => {
   assert.match(html, /USD\/contract/, "the unit says which");
 });
 
+check("a zero-cost structure is neither a credit nor a debit, and says so", () => {
+  // `Math.abs` takes the sign off the number, so the word beside it is carrying the
+  // whole distinction — and at exactly zero there is no distinction to carry. A costless
+  // structure reading `0.00 debit` states something untrue about which way money moved.
+  const costless: Metrics = { ...METRICS, net_premium: 0 };
+  const html = renderToStaticMarkup(<MetricsPanel metrics={costless} factor={1} unit="USD" />);
+  assert.doesNotMatch(html, /debit/);
+  assert.doesNotMatch(html, /credit/);
+  assert.match(html, />0\.00</);
+});
+
 console.log("\nGreeksTable — per leg, then the total, and the unit in the header");
 
 /** The two legs of the strangle, already signed by direction and scaled by quantity
@@ -128,7 +139,7 @@ const LEGS: AnalysedLeg[] = [
     quantity: 1,
     entry_price: 800,
     iv: 0.3712,
-    greeks: { delta: 0.41, gamma: 0.00002, vega: -0.3, theta: 40, rho: -0.05 },
+    greeks: { delta: 0.41, gamma: 0.0000312, vega: -0.3, theta: 40, rho: -0.05 },
   },
   {
     instrument: "DELTA-BTC-20260904-80000-C-USD",
@@ -174,6 +185,39 @@ check("THE MULTIPLIER: per contract a delta of 0.41 reads 0.00041, and the heade
   );
   assert.match(html, /0\.00041/, "a thousandth of the per-underlying figure");
   assert.match(html, /USD\/contract/);
+});
+
+
+check("gamma is scaled by ten thousand — the ladder's own convention, said in the header", () => {
+  // `formatGamma`'s reason, unchanged: gamma is orders of magnitude smaller than the
+  // other four, and a column of `0.00` claiming there is no convexity anywhere is the
+  // same lie `formatIv` refuses to tell about a floored volatility. One convention for
+  // one quantity across both screens, so a reader moving between them meets no surprise.
+  const html = renderToStaticMarkup(
+    <GreeksTable legs={LEGS} total={null} factor={1} unit="USD" />,
+  );
+  assert.match(html, /Γ ×10⁴/, "the header carries the scale");
+  // 0.0000312 × 10,000 = 0.312 — and the ladder prints 0.31 for the same figure.
+  assert.match(html, />0\.31</);
+});
+
+check("THE DEFAULT STATE: a per-contract gamma reads as a number, not as 3.12e-8", () => {
+  const html = renderToStaticMarkup(
+    <GreeksTable legs={LEGS} total={null} factor={0.001} unit="USD/contract" />,
+  );
+  // 0.0000312 × 0.001 × 10,000 = 0.000312. Without the ×10⁴ this was 3.12e-8, rendered
+  // in scientific notation in the state the screen opens in.
+  assert.match(html, />0\.000312</);
+  assert.doesNotMatch(html, /e-\d/, "no scientific notation in a column of exposures");
+});
+
+check("the total's gamma is scaled the same way, or the row disagrees with the rows above it", () => {
+  const total = { delta: -0.21, gamma: -0.0000456, vega: -1.1, theta: 130, rho: -0.16 };
+  const html = renderToStaticMarkup(
+    <GreeksTable legs={LEGS} total={total} factor={1} unit="USD" />,
+  );
+  // -0.0000456 × 10,000 = -0.456 → -0.46
+  assert.match(html, />-0\.46</);
 });
 
 console.log("\nPayoffTable — the readable grid, on the same axis as the chart");
@@ -223,14 +267,25 @@ const STRANGLE: Curve = {
   window: { low: 70000, high: 84000 },
 };
 
-check("the line is drawn through all four corners at the engine's own window", () => {
+check("the line is drawn through all four corners, at the coordinates worked by hand", () => {
   const html = renderToStaticMarkup(
     <PayoffChart curve={STRANGLE} forward={77609.4} breakevens={[72600, 81400]} factor={1} unit="USD" />,
   );
   const points = /points="([^"]+)"/.exec(html);
   assert.ok(points, "a polyline is drawn");
-  // Four corners, and the window edges coincide with the outermost two, so four pairs.
-  assert.equal(points![1]!.split(" ").length, 4);
+  /*
+   * The exact coordinates, not a count of them — a count leaves the component's own
+   * composition of span, vertical fit and frame unpinned, which is the half the pure
+   * geometry tests cannot reach.
+   *
+   * Worked from the frame constants and the strangle's four corners:
+   *   vertical span   P&L runs -2,600..1,400 and zero is already inside, so the
+   *                   height is 4,000 and the 8% pad is 320: -2,920..1,720, range 4,640
+   *   x per price     880 / 14,000 = 0.0628571    y per P&L   320 / 4,640 = 0.0689655
+   *   74,000          4,000  x 0.0628571 = 251.43   +1,400 -> (1,720-1,400) x 0.0689655 = 22.07
+   *   80,000          10,000 x 0.0628571 = 628.57   -2,600 -> (1,720+2,600) x 0.0689655 = 297.93
+   */
+  assert.equal(points![1], "0,297.93 251.43,22.07 628.57,22.07 880,297.93");
 });
 
 check("the forward and both breakevens are marked", () => {
@@ -252,8 +307,22 @@ check("THE MULTIPLIER: the P&L axis carries the unit, the price axis never does"
     />,
   );
   assert.match(html, /USD\/contract/);
-  // The horizontal axis is a price of the underlying: 74,000 is still 74,000.
-  assert.match(html, /74,000|72,600/);
+  /*
+   * Two separate claims, and the alternation this replaced proved neither: it passed if
+   * *either* an axis tick or a breakeven label happened to be unscaled.
+   *
+   * The price axis is untouched. `linearTicks(70,000, 84,000, 6)` steps by 2,500, so the
+   * ticks are 70,000 / 72,500 / ... / 82,500 — and they are still those prices, not
+   * 70.00 and 82.50.
+   */
+  assert.match(html, />70,000</, "the first price tick is a price");
+  assert.match(html, />82,500</, "and so is the last");
+  /*
+   * The P&L axis *is* scaled. `linearTicks(-2,920, 1,720, 5)` steps by 1,000, so the
+   * ticks are -2,000 / -1,000 / 0 / 1,000 per underlying — and -2.00 per contract.
+   */
+  assert.match(html, />-2\.00</, "the P&L axis carries the lot size");
+  assert.doesNotMatch(html, />-2,000\.00</, "and does not carry both at once");
 });
 
 check("no non-finite number ever reaches an attribute", () => {

@@ -1,16 +1,12 @@
 import type { Metadata } from "next";
 
 import AnalyseScreen from "@/components/AnalyseScreen";
-import { parseView } from "@/lib/view";
+import { firstParam, parseView } from "@/lib/view";
 
 export const metadata: Metadata = {
   title: "Payoff",
   description: "Profit and loss at expiry for one strategy on one expiry.",
 };
-
-function firstParam(value: string | string[] | undefined): string | null {
-  return Array.isArray(value) ? (value[0] ?? null) : (value ?? null);
-}
 
 /**
  * The analyse route, opened in a **new tab** from the chain so the ladder keeps

@@ -26,7 +26,11 @@ import assert from "node:assert/strict";
 
 import type { Curve } from "@/lib/payoff";
 import {
+  PLOT_LEFT,
+  PLOT_WIDTH,
+  VIEWBOX_WIDTH,
   engineSpan,
+  priceAtPointer,
   pnlAt,
   polyline,
   projectX,
@@ -366,6 +370,66 @@ check("a window nowhere near zero is untouched — the focus still stays put", (
     min: 73500,
     max: 80500,
   });
+});
+
+console.log("\npayoffChart / priceAtPointer — what the wheel is actually zooming about");
+
+/*
+ * The mapping the component used to do by hand, and got wrong.
+ *
+ * The `<svg>` element is `VIEWBOX_WIDTH` units wide; the plot inside it is translated
+ * right by `PLOT_LEFT` and is only `PLOT_WIDTH` wide. Treating the fraction across the
+ * *element* as the fraction across the *plot* displaces the focus right by
+ * `PLOT_LEFT / VIEWBOX_WIDTH` of the window — 7.05% — and the error compounds across a
+ * gesture, because each event zooms about a price further right than the one under the
+ * pointer. The whole reason the wheel listener is registered by hand with
+ * `{ passive: false }` is that the price under the pointer stays put, so this is the one
+ * piece of arithmetic on which that justification rests.
+ *
+ * `renderToStaticMarkup` never runs an effect, so the wheel path has no DOM coverage by
+ * construction. Moving the mapping here is what makes it checkable at all.
+ */
+check("the plot's left edge is the window's left edge, not seven percent inside it", () => {
+  // The element rendered at 1 CSS pixel per viewBox unit, flush against the viewport.
+  // SVG x = 68 is where the plot starts, so it is 70,000 — the old arithmetic called it
+  // 70,000 + (68/964)·14,000 = 70,987.
+  assert.equal(priceAtPointer({ min: 70000, max: 84000 }, PLOT_LEFT, 0, VIEWBOX_WIDTH), 70000);
+});
+
+check("the plot's right edge is the window's right edge", () => {
+  assert.equal(
+    priceAtPointer({ min: 70000, max: 84000 }, PLOT_LEFT + PLOT_WIDTH, 0, VIEWBOX_WIDTH),
+    84000,
+  );
+});
+
+check("the middle of the plot is the middle of the window", () => {
+  // 68 + 440 = 508 in viewBox units.
+  assert.equal(
+    priceAtPointer({ min: 70000, max: 84000 }, PLOT_LEFT + PLOT_WIDTH / 2, 0, VIEWBOX_WIDTH),
+    77000,
+  );
+});
+
+check("it holds at any rendered width, because the viewBox scales and the pointer does not", () => {
+  // Half size: 482 CSS pixels for 964 units, so the plot's left edge is at 34.
+  assert.equal(priceAtPointer({ min: 70000, max: 84000 }, 34, 0, VIEWBOX_WIDTH / 2), 70000);
+  // And offset from the viewport's left edge, which is what `getBoundingClientRect` gives.
+  assert.equal(
+    priceAtPointer({ min: 70000, max: 84000 }, 200 + PLOT_LEFT, 200, VIEWBOX_WIDTH),
+    70000,
+  );
+});
+
+check("a pointer in the axis gutter or the right margin clamps to the plot's own edges", () => {
+  // The label gutter is not part of the window; zooming about a price outside it would
+  // move the curve out from under the pointer in the other direction.
+  assert.equal(priceAtPointer({ min: 70000, max: 84000 }, 10, 0, VIEWBOX_WIDTH), 70000);
+  assert.equal(priceAtPointer({ min: 70000, max: 84000 }, 962, 0, VIEWBOX_WIDTH), 84000);
+});
+
+check("an element with no width yet zooms about the centre rather than dividing by zero", () => {
+  assert.equal(priceAtPointer({ min: 70000, max: 84000 }, 0, 0, 0), 77000);
 });
 
 if (failures > 0) {

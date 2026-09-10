@@ -18,6 +18,11 @@ import {
   type SmileResponse,
   type Underlying,
 } from "./contract";
+import {
+  ContractViolationError,
+  EngineResponseError,
+  EngineUnreachableError,
+} from "./engine-errors";
 import { FIXTURE_CHAIN, fixtureChain, fixtureExpiries, fixtureSmile } from "./fixture";
 import {
   assertPayoff,
@@ -26,6 +31,11 @@ import {
   type AnalyseResponse,
   type LegRequest,
 } from "./payoff";
+
+/* Re-exported so every caller keeps the one import site it already uses. `lib/payoff.ts`
+   is the exception and imports `./engine-errors` directly — going through here would put
+   the cycle straight back. */
+export { ContractViolationError, EngineResponseError, EngineUnreachableError };
 
 export const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL ?? "http://localhost:8000";
 
@@ -47,33 +57,6 @@ export interface Loaded<T> {
    * this is always undefined and the page simply takes the front expiry.
    */
   preferredExpiry?: string;
-}
-
-/** The engine answered, but with an error status. Carries FastAPI's `detail`. */
-export class EngineResponseError extends Error {
-  constructor(
-    readonly status: number,
-    detail: string,
-  ) {
-    super(detail);
-    this.name = "EngineResponseError";
-  }
-}
-
-/** The engine could not be reached at all — not running, wrong port, CORS, DNS. */
-export class EngineUnreachableError extends Error {
-  constructor(cause: unknown) {
-    super(cause instanceof Error ? cause.message : String(cause));
-    this.name = "EngineUnreachableError";
-  }
-}
-
-/** The engine answered 200 with a body the contract forbids. */
-export class ContractViolationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ContractViolationError";
-  }
 }
 
 async function get<T>(path: string): Promise<T> {

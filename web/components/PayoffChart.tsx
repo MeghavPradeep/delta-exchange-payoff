@@ -5,8 +5,15 @@ import { useEffect, useRef, useState } from "react";
 import { formatScaled, formatStrike } from "@/lib/format";
 import type { Curve } from "@/lib/payoff";
 import {
+  PLOT_HEIGHT,
+  PLOT_LEFT,
+  PLOT_TOP,
+  PLOT_WIDTH,
+  VIEWBOX_HEIGHT,
+  VIEWBOX_WIDTH,
   engineSpan,
   polyline,
+  priceAtPointer,
   projectX,
   projectY,
   verticalSpan,
@@ -16,14 +23,6 @@ import {
   type Span,
 } from "@/lib/payoffChart";
 import { linearTicks } from "@/lib/scale";
-
-/** The plot area, in SVG units. The `viewBox` scales it to whatever width it is given,
- * so these are proportions rather than pixels. */
-const PLOT_WIDTH = 880;
-const PLOT_HEIGHT = 320;
-const LEFT = 68;
-const TOP = 14;
-const BOTTOM = 26;
 
 /** One press of the zoom buttons. `1 / 1.6` in, `1.6` out — about three presses to
  * double, which is a readable step for a control that has no focus point to aim at. */
@@ -95,12 +94,15 @@ export default function PayoffChart({
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
       const box = svg.getBoundingClientRect();
-      const across = box.width > 0 ? (event.clientX - box.left) / box.width : 0.5;
       setSpan((current) =>
         zoomAbout(
           current,
           wheelFactor(event.deltaY),
-          current.min + across * (current.max - current.min),
+          // Not the fraction across the element: the plot is inset from it by the axis
+          // gutter, and reading one as the other displaces the focus by 7% of the window
+          // and compounds over a gesture. `priceAtPointer` owns that mapping and is
+          // hand-checked in `payoff-chart.test.ts`, which is the only place it can be.
+          priceAtPointer(current, event.clientX, box.left, box.width),
         ),
       );
     };
@@ -134,12 +136,12 @@ export default function PayoffChart({
 
       <svg
         className="payoff-svg"
-        viewBox={`0 0 ${LEFT + PLOT_WIDTH + 16} ${TOP + PLOT_HEIGHT + BOTTOM}`}
+        viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
         role="img"
         aria-label={`Profit and loss at expiry between ${formatStrike(span.min)} and ${formatStrike(span.max)}`}
         ref={frame}
       >
-        <g transform={`translate(${LEFT},${TOP})`}>
+        <g transform={`translate(${PLOT_LEFT},${PLOT_TOP})`}>
           {/* The P&L axis. Its labels carry the multiplier; the price axis never does. */}
           {linearTicks(ySpan.min, ySpan.max, 5).map((tick) => {
             const y = projectY(tick, ySpan, PLOT_HEIGHT);
