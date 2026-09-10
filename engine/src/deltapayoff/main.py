@@ -9,11 +9,19 @@ while it serves what was already computed and stored. It calls nothing, solves n
 has no upstream to be unavailable, so it has no 502 and no 404. See `smile.py`.
 
 `/recording` is odder still, and it is the **only mutating route in this engine** — every
-other one is a `GET` or a websocket. It reports whether the store is writing and lets a
+other one is a `GET`, a websocket, or `/analyse`, which is a `POST` that changes nothing.
+It reports whether the store is writing and lets a
 reader stop and start it, which is why `allow_methods` below is no longer `["GET"]` alone:
 a `POST` against a `GET`-only allowance is refused at the preflight and surfaces in the
 browser as a network error indistinguishable from the engine being down. Who may call it
 is answered in `docs/recording-contract.md` rather than left unexamined.
+
+`/analyse` is a `POST` for its **request**, not for any effect: a strategy is an ordered
+list of legs and does not fit in a query string. It stores nothing, publishes no event and
+computes nothing new — `docs/payoff-contract.md` is its authority and `analyse.py` is the
+composition, over `compute.enrich`'s numbers and `payoff.py`'s arithmetic. It is the only
+route that serves **both** read paths, the live cache and the stored minute, chosen by
+whether the caller named one.
 
 `/ws/chain` exists so the screen updates without anyone pressing anything. It sends the
 identical object `/chain` returns, so `web/components/ChainLadder.tsx` renders it
@@ -65,6 +73,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import log_events
 from .adapters import Adapter, DeltaAdapter, DeltaFeed
+from .analyse import AnalyseRefusal, analysed, strategy_series
 from .chain import (
     UNDERLYINGS,
     ValidationError,
@@ -90,6 +99,7 @@ from .models import (
     SmileResponse,
     WatchedPair,
 )
+from .payoff_models import AnalyseRequest, AnalyseResponse
 from .realised_vol import ESTIMATORS
 from .redis_bus import REDIS_BUS, BusConfig, RedisBus, selected_bus
 from .smile import read_smile
@@ -1329,6 +1339,74 @@ def chain_at(
             "detail": f"no stored quotes for {symbol} expiring {expiry_date} at {minute}",
         }
     return {"type": "chain", "data": ladder.model_dump(mode="json")}
+
+
+@app.post("/analyse", response_model=AnalyseResponse)
+async def analyse(
+    request: AnalyseRequest,
+    stream: Annotated[ChainStream | None, Depends(get_watched_stream)],
+    source: Annotated[HistoricalSource, Depends(get_historical_source)],
+) -> AnalyseResponse:
+    """Everything about one strategy, in one response. `docs/payoff-contract.md`.
+
+    **This route chooses the ladder and nothing else.** `analyse.analysed` composes the
+    answer out of `compute.enrich`'s forward, volatility and Greeks and `payoff.py`'s
+    corners and metrics; both were built and tested without a socket, and the only thing
+    that has to happen here is deciding which of the two existing read paths answers.
+
+    **`as_of` absent means live**, and a live cache that has not warmed is a **503**: the
+    answer exists, it does not exist *yet*, which is exactly `get_bar_writer`'s reasoning
+    for `/recording` one screen up. **`as_of` present is a stored minute**, and one the
+    store does not hold is a **404** — under the never-forward-fill rule a minute with no
+    arrivals produces no row at all, so that minute genuinely does not exist. Neither
+    borrows `/chain/at`'s 200-with-`waiting`: that envelope exists so a ladder component
+    can draw *something* while it waits, and `/analyse` is a one-shot POST whose only
+    product is an analysis. `docs/payoff-contract.md` carries the argument in full.
+
+    `async def`, unlike the four store routes above it, because the two halves want
+    opposite things: the live cache is the object the feed's own recompute task mutates
+    on this loop, so reading it from a worker thread could catch a half-finished pass,
+    while the stored read opens Parquet files and would block that loop. So the cache is
+    read here and the store in a thread, which is what `store.py` already does with its
+    flushes for the same reason.
+    """
+    try:
+        instruments, underlying, expiry = strategy_series(request.legs)
+        if request.as_of is not None:
+            when = _validated_minute(request.as_of)
+            chain = await asyncio.to_thread(
+                read_ladder_at,
+                source.quote,
+                source.reference,
+                source.computed,
+                source.spot,
+                underlying,
+                expiry,
+                when,
+            )
+            if chain is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        f"the store holds no quotes for {underlying} expiring "
+                        f"{expiry} at {request.as_of}"
+                    ),
+                )
+        else:
+            chain = None if stream is None else stream.chain(underlying, expiry)
+            if chain is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        f"no live ladder for {underlying} expiring {expiry} yet; "
+                        "the chain cache has not warmed"
+                    ),
+                )
+        return analysed(chain, request.legs, instruments)
+    except AnalyseRefusal as refusal:
+        raise HTTPException(
+            status_code=refusal.status_code, detail=str(refusal)
+        ) from refusal
 
 
 @app.get("/bars", response_model=ContractBarsResponse)

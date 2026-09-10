@@ -36,6 +36,18 @@ QUOTE_CURRENCY = "USD"
 #: they differ must not require this module's shape to change.
 SETTLEMENT_CURRENCY = "USD"
 
+#: The lot size, per underlying — how much of the asset one contract is. **Measured**,
+#: `docs/settlement.md` §3.2: a full cursor walk of `/v2/products?page_size=500` on
+#: 2026-09-01 returned 1,031 options, `contract_value` 0.001 on all 594 BTC contracts
+#: and 0.01 on all 318 ETH ones.
+#:
+#: A **presentation** multiplier and nothing else. Every price on this venue is USD per
+#: one unit of the underlying, so this never enters a pricing or parity calculation —
+#: `docs/settlement.md` §4 is explicit that multiplying by it inside a solver is a bug.
+#: `/analyse` echoes it so the screen can turn per-unit figures into dollars per
+#: contract at the very end; the engine never applies it.
+CONTRACT_VALUES = {"BTC": 0.001, "ETH": 0.01}
+
 EXPIRY_RE = re.compile(r"^\d{2}-\d{2}-\d{4}$")
 EXPIRY_FORMAT = "%d-%m-%Y"
 
