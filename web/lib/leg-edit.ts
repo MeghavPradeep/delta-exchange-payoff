@@ -13,6 +13,13 @@
  * half-typed `"1e"` would fire a request a keystroke for a strategy nobody changed.
  * Identity is the signal, and these functions are careful with it.
  *
+ * **`commit*` is the pair of each `with*`, and it exists because the inputs are
+ * uncontrolled.** A refused edit returns the same array, so nothing re-renders and the
+ * DOM keeps what was typed: a quantity box reading `0` beside metrics, a curve and a URL
+ * that all describe a quantity of 1. `commit*` returns the strategy **and the text the
+ * field must show**, so the caller can re-seed the box when the two disagree. The
+ * rejection was always correct; what was missing was telling the reader.
+ *
  * **`Number`, never `parseFloat`.** The project's rule is about decimals arriving from
  * the engine, which are JSON numbers and are never parsed; a character a human typed
  * into a text field has to be read somehow. `Number` is what `lib/legs-url.ts` already
@@ -36,17 +43,28 @@ function replace(
   return legs.map((candidate, i) => (i === index ? next : candidate));
 }
 
+/** Decimal digits and nothing else. `Number` alone would read `"1e3"` as 1000 and
+ *  `"0x10"` as 16 — both positive integers, and neither one a quantity `lib/legs-url.ts`
+ *  can spell: its fragment is `(\d+)`, so a quantity accepted here that could not survive
+ *  the round trip would be a strategy the link cannot carry. */
+const DIGITS = /^\d+$/;
+
 /**
  * "What if I did two of these."
  *
  * A positive integer, and nothing else — the contract's own words for `quantity`, and
  * the sign is never here: it lives in `direction`, which is why `"-1"` is refused rather
  * than being read as a sale.
+ *
+ * An edit to the quantity already in force is not an edit: see this module's header on
+ * identity, and `AnalyseScreen` for what a fresh array costs.
  */
 export function withQuantity(legs: LegRequest[], index: number, typed: string): LegRequest[] {
   return replace(legs, index, (leg) => {
-    const quantity = Number(typed.trim());
-    if (typed.trim() === "" || !Number.isInteger(quantity) || quantity < 1) return null;
+    const text = typed.trim();
+    if (!DIGITS.test(text)) return null;
+    const quantity = Number(text);
+    if (quantity < 1 || quantity === leg.quantity) return null;
     return { ...leg, quantity };
   });
 }
@@ -73,6 +91,7 @@ export function withEntryPrice(legs: LegRequest[], index: number, typed: string)
     }
     const entryPrice = Number(typed.trim());
     if (!Number.isFinite(entryPrice) || entryPrice < 0) return null;
+    if (entryPrice === leg.entry_price) return null;
     return { ...leg, entry_price: entryPrice };
   });
 }
@@ -92,6 +111,49 @@ export function withInstrument(legs: LegRequest[], index: number, typed: string)
     if (!looksCanonical(instrument) || instrument === leg.instrument) return null;
     return { ...leg, instrument };
   });
+}
+
+/**
+ * What a field must show for the leg as it now stands — the other half of a commit.
+ *
+ * Empty for an absent `entry_price`, which is the field's way of saying "priced from the
+ * book". `String` on a number rather than any formatting: this is the text of a value,
+ * not a presentation of it, and a thousands separator here would not survive being read
+ * back.
+ */
+function quantityText(leg: LegRequest): string {
+  return String(leg.quantity);
+}
+
+function priceText(leg: LegRequest): string {
+  return leg.entry_price === undefined || leg.entry_price === null ? "" : String(leg.entry_price);
+}
+
+/** A strategy, and the text the field that produced it must now show. When `text` differs
+ *  from what was typed, the edit was refused (or normalised) and an uncontrolled input has
+ *  to be re-seeded — otherwise it goes on displaying a value nothing else on the screen
+ *  agrees with. */
+export interface Commit {
+  legs: LegRequest[];
+  text: string;
+}
+
+export function commitQuantity(legs: LegRequest[], index: number, typed: string): Commit {
+  const next = withQuantity(legs, index, typed);
+  const leg = next[index];
+  return { legs: next, text: leg === undefined ? typed : quantityText(leg) };
+}
+
+export function commitEntryPrice(legs: LegRequest[], index: number, typed: string): Commit {
+  const next = withEntryPrice(legs, index, typed);
+  const leg = next[index];
+  return { legs: next, text: leg === undefined ? typed : priceText(leg) };
+}
+
+export function commitInstrument(legs: LegRequest[], index: number, typed: string): Commit {
+  const next = withInstrument(legs, index, typed);
+  const leg = next[index];
+  return { legs: next, text: leg === undefined ? typed : leg.instrument };
 }
 
 /** The strategy without this leg. Removing the last one leaves `[]`, which is a screen

@@ -1,6 +1,15 @@
 "use client";
 
-import { removeLeg, withEntryPrice, withInstrument, withQuantity } from "@/lib/leg-edit";
+import { useState } from "react";
+
+import {
+  type Commit,
+  commitEntryPrice,
+  commitInstrument,
+  commitQuantity,
+  removeLeg,
+  withQuantity,
+} from "@/lib/leg-edit";
 import type { LegRequest } from "@/lib/payoff";
 
 /**
@@ -26,6 +35,15 @@ import type { LegRequest } from "@/lib/payoff";
  * what re-seeds a row when the leg under it genuinely changes, which is exactly when a
  * leg is removed and the rows below it shift up.
  *
+ * **A refused edit does not stay in the field.** `commitQuantity` and its two siblings
+ * return the strategy *and* the text the field must now show; when that differs from what
+ * was typed, `reseed` bumps a counter in every row's `key` and React remounts the row,
+ * which re-reads `defaultValue` from the leg. Without it the rejection is silent: the box
+ * keeps `0` while the metrics, the curve and the URL all describe a quantity of 1, which
+ * is this feature's characteristic failure — never a wrong number, always a plausible
+ * screen. The re-seed is on **blur**, not on every keystroke, so a field being cleared on
+ * the way to a new value is not fought halfway through.
+ *
  * **Quantity commits as you type; the contract and the price commit on leaving the
  * field or on Enter.** Every commit re-asks `POST /analyse`, and a half-typed strike is
  * a different contract while a half-typed price is a different price — `9`, `90`, `900`
@@ -36,6 +54,17 @@ import type { LegRequest } from "@/lib/payoff";
  * fourth; B and S are separate positions rather than one signed quantity, and a toggle
  * that turned a bought leg into a sold one at the same entry price would quietly claim a
  * fill on the other side of the spread.
+ *
+ * **The address bar is debounced and the request is not, deliberately.** Typing `1234`
+ * into the quantity box commits four times and issues four `POST /analyse`. The 200 ms
+ * settle on the URL exists because Firefox and Safari throttle `replaceState` itself —
+ * it is a browser-level cost that a burst can actually hit. A request is not that: an
+ * analysis measured **3.3 ms** median on a four-leg strategy against the 69-strike
+ * 04-09-2026 capture (P6, 2026-09-10), each abandoned subscription is stopped so its
+ * answer is dropped rather than racing the new one, and a debounce would put a delay
+ * between a keystroke and the metrics it is being typed to see. Cost measured, latency
+ * chosen; if the cost ever matters, `docs/superpowers` P6's report names compression as
+ * the first move.
  */
 export default function LegEditor({
   legs,
@@ -44,6 +73,19 @@ export default function LegEditor({
   legs: LegRequest[];
   onLegsChange: (legs: LegRequest[]) => void;
 }) {
+  /** Bumped whenever a field has to be re-seeded from the leg. It is in every row's
+   *  `key`, which is what makes React remount the row and re-read `defaultValue` — the
+   *  only lever an uncontrolled input offers. One counter for the whole panel rather than
+   *  one per row: a re-seed happens on blur, so no other field is being typed into. */
+  const [reseeds, setReseeds] = useState(0);
+
+  /** Apply a commit, and put the value in force back in the box when the typed text was
+   *  not what the strategy accepted. */
+  const commit = (commited: Commit, typed: string) => {
+    onLegsChange(commited.legs);
+    if (commited.text !== typed) setReseeds((n) => n + 1);
+  };
+
   return (
     <section className="legs-panel leg-editor" aria-label="Strategy">
       <h2 className="legs-panel-title">
@@ -53,7 +95,7 @@ export default function LegEditor({
       <ul className="legs-list">
         {legs.map((leg, index) => (
           <li
-            key={`${leg.instrument}:${leg.direction}:${index}`}
+            key={`${leg.instrument}:${leg.direction}:${index}:${reseeds}`}
             className="leg-row leg-edit-row"
           >
             <span className={`leg-direction ${leg.direction === 1 ? "b" : "s"}`}>
@@ -66,7 +108,9 @@ export default function LegEditor({
               title="The canonical instrument string. The engine is the authority on it and names the part that was wrong."
               defaultValue={leg.instrument}
               spellCheck={false}
-              onBlur={(event) => onLegsChange(withInstrument(legs, index, event.target.value))}
+              onBlur={(event) =>
+                commit(commitInstrument(legs, index, event.target.value), event.target.value)
+              }
               onKeyDown={(event) => {
                 if (event.key === "Enter") event.currentTarget.blur();
               }}
@@ -81,6 +125,9 @@ export default function LegEditor({
               step={1}
               defaultValue={leg.quantity}
               onChange={(event) => onLegsChange(withQuantity(legs, index, event.target.value))}
+              onBlur={(event) =>
+                commit(commitQuantity(legs, index, event.target.value), event.target.value)
+              }
             />
 
             <input
@@ -91,7 +138,9 @@ export default function LegEditor({
               inputMode="decimal"
               placeholder="from the book"
               defaultValue={leg.entry_price ?? ""}
-              onBlur={(event) => onLegsChange(withEntryPrice(legs, index, event.target.value))}
+              onBlur={(event) =>
+                commit(commitEntryPrice(legs, index, event.target.value), event.target.value)
+              }
               onKeyDown={(event) => {
                 if (event.key === "Enter") event.currentTarget.blur();
               }}

@@ -141,3 +141,35 @@ export function analyseHref(legs: LegRequest[], minute: string | null): string {
   if (minute) params.set("minute", minute);
   return `/analyse?${params.toString().replace(/%3A/g, ":").replace(/%2C/g, ",")}`;
 }
+
+/**
+ * The address a screen should write for this strategy — or **`null` for "leave the
+ * address bar exactly as it is"**.
+ *
+ * **The invariant, and it belongs to the pattern rather than to any one screen: a URL
+ * rewrite must never outlive an unreported parse failure.** Every screen here syncs the
+ * address bar to its own state a moment after the state settles. When the state was
+ * decoded *from* that address bar and the decode failed, those two facts combine into a
+ * quiet disaster: `decodeLegs` throws naming the fragment that was wrong, the screen puts
+ * that sentence on the page — and 200 ms later the sync replaces the reader's
+ * `?legs=<the text they need to fix>` with `?legs=`. The notice then describes a string
+ * nobody can see any more, and a reload turns a broken link into an empty one.
+ *
+ * The chain screen had exactly this defect and it was fixed there in P4, as a guard in
+ * that component. It came back on the analyse screen in P6 because a guard in a component
+ * is not a property of the pattern. So the rule lives here now, beside the codec whose
+ * throwing it protects: **any screen that syncs a decoded strategy back into the URL calls
+ * this rather than `analyseHref`, and honours the `null`.**
+ *
+ * `null` only while a decode failure is unreported. An emptied strategy is not one — the
+ * reader removed the last leg, `?legs=` is the truth about what is on screen, and a link
+ * that still named the legs they deleted would be the lie in the other direction.
+ */
+export function syncedAnalyseHref(
+  legs: LegRequest[],
+  minute: string | null,
+  legsError: string | null,
+): string | null {
+  if (legsError !== null) return null;
+  return analyseHref(legs, minute);
+}

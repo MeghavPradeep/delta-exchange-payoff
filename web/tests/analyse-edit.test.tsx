@@ -24,8 +24,16 @@ import assert from "node:assert/strict";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import AnalyseView from "@/components/AnalyseView";
-import { removeLeg, withEntryPrice, withInstrument, withQuantity } from "@/lib/leg-edit";
-import { decodeLegs, encodeLegs } from "@/lib/legs-url";
+import {
+  commitEntryPrice,
+  commitInstrument,
+  commitQuantity,
+  removeLeg,
+  withEntryPrice,
+  withInstrument,
+  withQuantity,
+} from "@/lib/leg-edit";
+import { decodeLegs, encodeLegs, syncedAnalyseHref } from "@/lib/legs-url";
 import type { AnalyseResponse, LegRequest } from "@/lib/payoff";
 
 let failures = 0;
@@ -130,6 +138,93 @@ check("an index nobody holds is not an edit", () => {
   assert.equal(withInstrument(legs, 9, PUT), legs);
 });
 
+check("AN ACCEPTED EDIT THAT CHANGES NOTHING IS NOT AN EDIT — fix round 1, minor 3", () => {
+  // Identity is the signal: a fresh array restarts the subscription, blanks the chart to
+  // "Analysing…" and fires a request for a strategy nobody changed. Tabbing out of a
+  // field, or re-committing "2" as "02", must not do that.
+  const legs = withEntryPrice(withQuantity(one(), 0, "2"), 0, "900");
+  assert.equal(withQuantity(legs, 0, "2"), legs, "the same quantity");
+  assert.equal(withQuantity(legs, 0, "02"), legs, "the same quantity, spelled differently");
+  assert.equal(withEntryPrice(legs, 0, "900"), legs, "the same price");
+  assert.equal(withEntryPrice(legs, 0, " 900 "), legs, "the same price, with the spaces");
+  assert.equal(withInstrument(legs, 0, CALL), legs, "the same contract");
+  const bare = one();
+  assert.equal(withEntryPrice(bare, 0, ""), bare, "clearing a price nobody ever set");
+});
+
+check("a quantity is decimal digits, not everything Number will read — fix round 1, minor 7", () => {
+  // `Number` reads "1e3" as 1000 and "0x10" as 16, both positive integers. The URL codec
+  // spells a quantity `(\d+)` and nothing else, so a quantity this accepted but that
+  // could not survive a round trip would be a strategy the link cannot carry.
+  const legs = one();
+  for (const typed of ["1e3", "0x10", "+2", "2.0"]) {
+    assert.equal(withQuantity(legs, 0, typed), legs, `"${typed}" was read as a quantity`);
+  }
+  assert.equal(withQuantity(legs, 0, " 2 ")[0]!.quantity, 2, "surrounding space is still fine");
+});
+
+console.log("\nleg-edit / commit* — what the field must show once the edit has been judged");
+
+check("A REJECTED EDIT DOES NOT STAY IN THE FIELD: the value in force comes back", () => {
+  // The inputs are uncontrolled, so nothing re-renders them when an edit is refused and
+  // the DOM keeps the typed text — a field reading 0 beside metrics, a curve and a URL
+  // that all describe a quantity of 1. `text` is what the field must be re-seeded with.
+  const held = one();
+  const rejected = commitQuantity(held, 0, "0");
+  assert.equal(rejected.legs, held, "the strategy is untouched, and identically so");
+  assert.equal(rejected.text, "1", "and the field shows the quantity in force, not the 0");
+
+  const priced = withEntryPrice(one(), 0, "900");
+  const badPrice = commitEntryPrice(priced, 0, "1.2.3");
+  assert.deepEqual(badPrice.legs, priced);
+  assert.equal(badPrice.text, "900");
+
+  const badContract = commitInstrument(one(), 0, "banana");
+  assert.deepEqual(badContract.legs, one());
+  assert.equal(badContract.text, CALL);
+});
+
+check("an accepted edit asks for no re-seed — the field already says what the leg says", () => {
+  const good = commitQuantity(one(), 0, "2");
+  assert.equal(good.legs[0]!.quantity, 2);
+  assert.equal(good.text, "2", "identical to what was typed, so nothing is re-seeded");
+
+  const cleared = commitEntryPrice(withEntryPrice(one(), 0, "900"), 0, "");
+  assert.equal("entry_price" in cleared.legs[0]!, false);
+  assert.equal(cleared.text, "", "an empty price field stays empty");
+
+  const moved = commitInstrument(one(), 0, PUT);
+  assert.equal(moved.legs[0]!.instrument, PUT);
+  assert.equal(moved.text, PUT);
+});
+
+console.log("\nlegs-url / syncedAnalyseHref — the address bar never eats a malformed link");
+
+check("A MALFORMED LINK IS NEVER OVERWRITTEN: the text needed to fix it stays in the bar", () => {
+  // The whole reason `decodeLegs` throws rather than dropping a fragment is that the
+  // reader is told which part was wrong — and the part that was wrong is in their
+  // address bar. A rewrite 200 ms later replaces it with `?legs=`, leaves the notice on
+  // screen describing text nobody can see any more, and turns a reload into "this link
+  // names no legs". The same defect was caught on the chain screen in P4.
+  assert.equal(
+    syncedAnalyseHref([], null, 'cannot read "DELTA-BTC:X" as a leg: bad quantity'),
+    null,
+    "no rewrite at all while a parse failure is on screen",
+  );
+  assert.equal(
+    syncedAnalyseHref(one(), null, 'cannot read "..." as a leg: bad quantity'),
+    null,
+    "not even when some legs did decode — the link is still the reader's only copy",
+  );
+  assert.equal(syncedAnalyseHref(one(), null, null), `/analyse?legs=${CALL}:B1`);
+  assert.equal(
+    syncedAnalyseHref(one(), "2026-09-04T09:21:00Z", null),
+    `/analyse?legs=${CALL}:B1&minute=2026-09-04T09:21:00Z`,
+    "and a stored tab keeps its minute in the link it writes",
+  );
+  assert.equal(syncedAnalyseHref([], null, null), "/analyse?legs=", "an emptied strategy is a fact");
+});
+
 console.log("\nAnalyseView — the editable screen, and the chip that says which tab it is");
 
 /** The worked response of `docs/payoff-contract.md`, as `analyse.test.ts` copies it. */
@@ -218,8 +313,7 @@ check("THE AS-OF CHIP, LIVE: it says live, and when it last heard back", () => {
       receivedAt="2026-09-04T09:21:07Z"
     />,
   );
-  assert.match(html, /live/);
-  assert.match(html, /09:21:07/, "the time of the last response");
+  assert.match(html, />live(<!-- -->)? \u00b7 updated 09:21:07</, "the chip's own text");
 });
 
 check("THE AS-OF CHIP, STORED: it names the minute and says it will not re-ask", () => {

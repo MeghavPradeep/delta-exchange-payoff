@@ -10,7 +10,7 @@ import {
   EngineResponseError,
   EngineUnreachableError,
 } from "@/lib/engine";
-import { LegsUrlError, analyseHref, decodeLegs } from "@/lib/legs-url";
+import { LegsUrlError, decodeLegs, syncedAnalyseHref } from "@/lib/legs-url";
 import type { AnalyseResponse, LegRequest } from "@/lib/payoff";
 
 /**
@@ -124,14 +124,22 @@ export default function AnalyseScreen({
   }, [legs, minute]);
 
   // The address bar follows the strategy; it never drives it after the first render.
+  //
+  // **`syncedAnalyseHref`, never `analyseHref` — a rewrite must never outlive an
+  // unreported parse failure.** When the strategy was decoded out of this very address
+  // bar and the decode threw, the text naming what was wrong is *in* the address bar, and
+  // rewriting it 200 ms later leaves the notice on screen describing a string nobody can
+  // read any more. The rule and its history are written down beside the codec, so the next
+  // screen that adopts this pattern inherits the rule rather than the bug.
   useEffect(() => {
-    const href = analyseHref(legs, minute);
+    const href = syncedAnalyseHref(legs, minute, strategy.error);
+    if (href === null) return;
     if (`${window.location.pathname}${window.location.search}` === href) return;
     const timer = window.setTimeout(() => {
       window.history.replaceState(null, "", href);
     }, URL_SETTLE_MS);
     return () => window.clearTimeout(timer);
-  }, [legs, minute]);
+  }, [legs, minute, strategy.error]);
 
   return (
     <AnalyseView
