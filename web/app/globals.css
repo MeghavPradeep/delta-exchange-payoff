@@ -1689,8 +1689,16 @@ td.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -
 .leg-quantity { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 .leg-label { color: var(--ink); }
 
-/* Disabled until #6 wires `/analyse` — `opacity` rather than hiding, so its title
-   ("not wired yet") is reachable and the panel does not jump when it becomes live. */
+/* Review round 1, minor #4: the tooltip explaining "not wired yet" lives on this wrapper,
+   not on the `<button>` inside it — a disabled control does not dispatch the pointer
+   events a `title` tooltip needs, in Chrome or Safari, so put on the button itself it
+   was never reachable. `display: block` so the button still fills the panel's width. */
+.analyse-wrap { display: block; }
+
+/* Disabled until #6 wires `/analyse` — `opacity` rather than hiding, so the panel does
+   not jump when it becomes live. Same 0.35 the other three disabled controls on this
+   page use (`.refresh:disabled`, `.ivr-slider input:disabled`, `.ivr-number:disabled`) —
+   one dimming recipe, not a fourth invented here. */
 .analyse {
   width: 100%;
   border: 1px solid var(--line-strong);
@@ -1704,7 +1712,7 @@ td.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -
   cursor: pointer;
 }
 .analyse:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-.analyse:disabled { opacity: 0.4; cursor: default; }
+.analyse:disabled { opacity: 0.35; cursor: default; }
 
 /* The B/S column, nearest the strike on both sides — `ChainLadder.tsx`'s own note on
    why. Same cell padding as every other column; the buttons fill it rather than the

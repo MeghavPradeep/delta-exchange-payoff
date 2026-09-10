@@ -47,6 +47,25 @@ function todayUtc(): string {
 }
 
 /**
+ * P4: the strategy the link that opened this page named, decoded exactly once.
+ *
+ * One `try` rather than two computing the same thing independently — this file used
+ * to seed `legs` and `legsError` from two separate `useState` initialisers that each
+ * called `decodeLegs(initialLegsParam)` on their own, agreeing only because nothing
+ * had yet edited one without the other. A malformed `legs=` is never treated as "no
+ * strategy": `decodeLegs` throws naming the part that was wrong, and `error` here
+ * carries that message for `ChainScreen` to show loudly, rather than quietly starting
+ * the reader on an empty position their link did not ask for.
+ */
+function decodeInitialLegs(param: string | null): { legs: LegRequest[]; error: string | null } {
+  try {
+    return { legs: decodeLegs(param), error: null };
+  } catch (err) {
+    return { legs: [], error: err instanceof LegsUrlError ? err.message : message(err) };
+  }
+}
+
+/**
  * `?underlying=BTC&expiry=04-09-2026` live, `&minute=...` added standing anywhere else,
  * `&instrument=...` added whenever the chart panel is open, `&legs=...` added whenever
  * the strategy is non-empty. `lib/view.ts`'s `viewQuery` was not reused: that one always
@@ -146,27 +165,24 @@ export default function ChainScreen({
   const [error, setError] = useState<string | null>(null);
 
   /**
-   * P4: the strategy, decoded once from the link that opened this page. A malformed
-   * `legs=` is never treated as "no strategy" — `decodeLegs` throws naming the part
-   * that was wrong, and that message is what `legsError` carries onto the screen below,
-   * loudly, rather than quietly starting the reader on an empty position their link did
-   * not ask for.
+   * P4: `legs` and `legsError` both read off this one state rather than each holding
+   * an independent copy — see `decodeInitialLegs`'s own comment for the bug this
+   * replaced. `error` clears itself the moment the reader makes their own edit
+   * (`pickLeg`, below): once they hold a strategy they built, a stale complaint about
+   * the link that opened the page no longer describes what is on screen.
    */
-  const [legs, setLegs] = useState<LegRequest[]>(() => {
-    try {
-      return decodeLegs(initialLegsParam);
-    } catch {
-      return [];
-    }
-  });
-  const [legsError] = useState<string | null>(() => {
-    try {
-      decodeLegs(initialLegsParam);
-      return null;
-    } catch (err) {
-      return err instanceof LegsUrlError ? err.message : message(err);
-    }
-  });
+  const [legsState, setLegsState] = useState(() => decodeInitialLegs(initialLegsParam));
+  const legs = legsState.legs;
+  const legsError = legsState.error;
+
+  /**
+   * A strategy cleared out from under the reader without a click of their own —
+   * switching underlying or expiry, `pickUnderlying`/`pickExpiry` below — gets one
+   * line saying so, the same "never silently" rule `legsError` keeps for a malformed
+   * link. Cleared on the next pick or the next switch, so it never survives to
+   * describe a clearing that is no longer the most recent thing that happened.
+   */
+  const [legsClearedNotice, setLegsClearedNotice] = useState<string | null>(null);
 
   /** #46: the contract chart panel. `null` means closed. Seeded from the URL so a link
    * carrying a contract opens straight onto its chart, as `docs/bars-contract.md`'s own
@@ -327,7 +343,15 @@ export default function ChainScreen({
     // Every leg names an instrument on the old underlying's chain — #2's "one expiry
     // per strategy" refusal is about two expiries of the *same* underlying and does not
     // even apply across two different underlyings, so there is no series here to carry.
-    setLegs([]);
+    // Said out loud (review round 1, minor #7) rather than left to be noticed by its
+    // absence: this screen's organising rule is that a leg is never dropped quietly.
+    if (legs.length > 0) {
+      setLegsClearedNotice(
+        `Switched to ${next} — the strategy named ${legs.length === 1 ? "a contract" : "contracts"} ` +
+          `on the previous underlying's chain, which does not follow across underlyings.`,
+      );
+    }
+    setLegsState({ legs: [], error: null });
   };
 
   const pickExpiry = (next: string) => {
@@ -336,22 +360,35 @@ export default function ChainScreen({
     setPanelInstrument(null);
     // A leg names its own expiry inside its instrument string; picking a different one
     // here would leave the strategy pointed at contracts no longer on this ladder.
-    setLegs([]);
+    if (legs.length > 0) {
+      setLegsClearedNotice(
+        `Switched to expiry ${next} — the strategy named ${legs.length === 1 ? "a contract" : "contracts"} ` +
+          `on the previous expiry, which does not follow across expiries.`,
+      );
+    }
+    setLegsState({ legs: [], error: null });
   };
 
   /**
    * B and S both add and remove, depending on what is already held — `lib/legs.ts`'s
    * `heldAt`/`addLeg`/`dropFirst`, the same pure functions the DOM fingerprint test
    * pins. The button lights when the contract beside it is in the strategy, so clicking
-   * a lit one has to take it back off; it removes **one** matching leg, so a two-lot
-   * position built by clicking B twice comes off with two clicks rather than one.
+   * a lit one has to take it back off; it removes **one lot**, decrementing a leg held
+   * at quantity 2 or more before ever deleting it outright (review round 1, important
+   * #1) — a two-lot position built by clicking B twice comes off one lot at a time.
+   *
+   * Clears both notices: a reader who has just built or edited a leg is not still
+   * looking at a complaint about the link that opened the page, or a note about a
+   * strategy that got cleared several clicks ago.
    */
   const pickLeg = (instrument: string, direction: LegDirection) => {
-    setLegs((current) =>
-      heldAt(current, instrument, direction)
-        ? dropFirst(current, instrument, direction)
-        : addLeg(current, instrument, direction),
-    );
+    setLegsClearedNotice(null);
+    setLegsState((current) => ({
+      legs: heldAt(current.legs, instrument, direction)
+        ? dropFirst(current.legs, instrument, direction)
+        : addLeg(current.legs, instrument, direction),
+      error: null,
+    }));
   };
 
   /** Where the scrubber puts the view. Standing on the right edge is spelled `null` —
@@ -510,6 +547,8 @@ export default function ChainScreen({
             rather than guessing which ones were meant.
           </p>
         ) : null}
+
+        {legsClearedNotice ? <p className="notice">{legsClearedNotice}</p> : null}
 
         {/*
           The ladder (or its status notice) in the growing column, the legs panel and

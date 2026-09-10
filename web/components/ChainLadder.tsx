@@ -157,18 +157,22 @@ function QuoteCells({
   onPick?: (instrument: string, direction: LegDirection) => void;
 }) {
   const pickable = Boolean(onPick);
-  const blankColumns = COLUMNS_PER_SIDE + (pickable ? 1 : 0);
 
   if (leg === null) {
     const label = `No ${side} listed at this strike`;
-    // One hatched cell per column on this side, the picks column included when it is
-    // in play. Built from a count rather than repeated by hand so it cannot drift out
-    // of step with `outwardIn` below.
+    // One hatched cell per existing column on this side — never `itm`-washed, since
+    // shading an absence would be a claim about a price that was never printed — plus
+    // one more, distinctly classed, when the picks column is in play. There is nothing
+    // to buy or sell on a side that is not listed at all, so it stays hatched too
+    // rather than growing a live button; `class="picks blank"` (not `class="picks"`
+    // alone) is what lets the DOM fingerprint test tell this cell apart from the
+    // quoted branch's below and strip only what P4 actually added.
     return (
       <>
-        {Array.from({ length: blankColumns }, (_, i) => (
+        {Array.from({ length: COLUMNS_PER_SIDE }, (_, i) => (
           <td key={i} className="blank" title={label} />
         ))}
+        {pickable && <td key="picks" className="picks blank" title={label} />}
       </>
     );
   }
@@ -308,7 +312,7 @@ function QuoteCells({
   const sold = heldAt(legs ?? [], instrument!, -1);
   const strikeText = formatStrike(strike);
   const picks = (
-    <td key="picks" className="picks">
+    <td key="picks" className={`picks ${itm}`.trim()}>
       <span className="bs">
         <button
           type="button"

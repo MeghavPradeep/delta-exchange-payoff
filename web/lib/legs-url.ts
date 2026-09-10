@@ -46,8 +46,17 @@ export function encodeLegs(legs: LegRequest[]): string {
     .join(",");
 }
 
-/** `<B|S><quantity>[@<entry_price>]`, the half of a fragment after the instrument. */
-const SIDE = /^([BS])(\d+)(?:@(\d+(?:\.\d+)?))?$/;
+/**
+ * `<B|S><quantity>[@<entry_price>]`, the half of a fragment after the instrument.
+ *
+ * **The price group is `.+`, not a decimal-shaped pattern.** It used to be
+ * `\d+(?:\.\d+)?`, which cannot match the exponential notation `String(n)` switches to
+ * outside roughly `1e-6`..`1e21` (`String(1e-7)` is `"1e-7"`) — so `encodeLegs` could
+ * silently write a fragment its own `decodeLegs` then rejected. The shape is checked
+ * afterwards, by `Number.isFinite` on whatever this group captured, which is the same
+ * split `quantity` already uses: match loosely here, validate the meaning below.
+ */
+const SIDE = /^([BS])(\d+)(?:@(.+))?$/;
 
 /**
  * One fragment into one leg, or an exception naming the part that was wrong.
@@ -88,7 +97,13 @@ function decodeLeg(fragment: string): LegRequest {
 
   const direction: Direction = side === "B" ? 1 : -1;
   const leg: LegRequest = { instrument, direction, quantity };
-  if (priceText !== undefined) leg.entry_price = Number(priceText);
+  if (priceText !== undefined) {
+    const entryPrice = Number(priceText);
+    if (!Number.isFinite(entryPrice)) {
+      throw new LegsUrlError(fragment, `entry_price must be a finite number, got "${priceText}"`);
+    }
+    leg.entry_price = entryPrice;
+  }
   return leg;
 }
 

@@ -65,22 +65,63 @@ check("B and S rather than 1 and -1, because a URL is read by people", () => {
   assert.equal(encodeLegs(legs), `${CALL}:B1`);
 });
 
-const MALFORMED: Array<[string, string]> = [
-  ["a missing ':' separator", "DELTA-BTC-20260904-77000-C-USDB1"],
-  ["a five-part pre-I1 instrument with no currency", "DELTA-BTC-20260904-77000-C:B1"],
-  ["an instrument with an unknown right", "DELTA-BTC-20260904-77000-X-USD:B1"],
-  ["a missing direction letter", `${CALL}:1`],
-  ["an unknown direction letter", `${CALL}:X1`],
-  ["a zero quantity", `${CALL}:B0`],
-  ["a negative quantity", `${CALL}:B-2`],
-  ["a fractional quantity", `${CALL}:B1.5`],
-  ["a truncated entry price", `${CALL}:B1@`],
-  ["one good leg and one broken", `${CALL}:B1,garbage`],
+// Minor #5: `encodeLegs` used `${leg.entry_price}` — plain JS number stringification —
+// which switches to exponential notation outside roughly 1e-6..1e21. The old decoder's
+// price group, `\d+(?:\.\d+)?`, could not read that shape back, so the encoder could
+// silently produce a fragment its own decoder rejected. Unreachable with a real USD
+// premium on a 0.5 tick, but this module is what Tasks 5 and 6 import for editable
+// prices, so the round trip has to hold for whatever a `number` can be.
+const AWKWARD_PRICES = [1e-7, 1e21, 0.00000001, 123456789012345];
+
+for (const price of AWKWARD_PRICES) {
+  check(`an entry price of ${price} survives the round trip`, () => {
+    const legs: LegRequest[] = [{ instrument: CALL, direction: 1, quantity: 1, entry_price: price }];
+    const decoded = decodeLegs(encodeLegs(legs));
+    assert.equal(decoded.length, 1);
+    assert.equal(decoded[0]!.entry_price, price);
+  });
+}
+
+// Minor #6: each case asserts the *distinguishing* text of its failure, not merely
+// that some `LegsUrlError` was thrown — an instrument failure has to read differently
+// from a direction failure, which has to read differently from a quantity failure, or
+// a trader staring at "cannot read ... as a leg" has no way to know which of the six
+// parts to go fix.
+const MALFORMED: Array<[string, string, RegExp]> = [
+  ["a missing ':' separator", "DELTA-BTC-20260904-77000-C-USDB1", /missing ':'/],
+  [
+    "a five-part pre-I1 instrument with no currency",
+    "DELTA-BTC-20260904-77000-C:B1",
+    /is not a canonical instrument string/,
+  ],
+  [
+    "an instrument with an unknown right",
+    "DELTA-BTC-20260904-77000-X-USD:B1",
+    /is not a canonical instrument string/,
+  ],
+  ["a missing direction letter", `${CALL}:1`, /expected <B\|S><quantity>/],
+  ["an unknown direction letter", `${CALL}:X1`, /expected <B\|S><quantity>/],
+  ["a zero quantity", `${CALL}:B0`, /quantity must be a positive integer/],
+  ["a negative quantity", `${CALL}:B-2`, /expected <B\|S><quantity>/],
+  ["a fractional quantity", `${CALL}:B1.5`, /expected <B\|S><quantity>/],
+  ["a truncated entry price", `${CALL}:B1@`, /expected <B\|S><quantity>/],
+  ["a non-numeric entry price", `${CALL}:B1@abc`, /entry_price must be a finite number/],
+  ["one good leg and one broken", `${CALL}:B1,garbage`, /missing ':'/],
 ];
 
-for (const [name, encoded] of MALFORMED) {
+for (const [name, encoded, expected] of MALFORMED) {
   check(`rejects ${name}`, () => {
-    assert.throws(() => decodeLegs(encoded), LegsUrlError);
+    try {
+      decodeLegs(encoded);
+      assert.fail(`expected a LegsUrlError for ${JSON.stringify(encoded)}`);
+    } catch (err) {
+      assert.ok(err instanceof LegsUrlError, "wrong error type");
+      assert.match(
+        (err as LegsUrlError).message,
+        expected,
+        `expected ${expected} in "${(err as LegsUrlError).message}"`,
+      );
+    }
   });
 }
 

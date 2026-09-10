@@ -46,14 +46,21 @@ export default function LegsPanel({ legs }: { legs: LegRequest[] }) {
         })}
       </ul>
 
-      <button
-        type="button"
-        className="analyse"
-        disabled
+      {/*
+        Review round 1, minor #4: a `title` on a **disabled** `<button>` never shows —
+        Chrome and Safari do not dispatch the pointer events a tooltip needs onto a
+        disabled control. Wrapping the button in a `<span>` puts the tooltip on an
+        element that *does* receive the hover, without making the button itself any
+        less disabled.
+      */}
+      <span
+        className="analyse-wrap"
         title="Not wired yet — the analyse screen this opens is a later ticket (#6)."
       >
-        Analyse {legs.length} {legs.length === 1 ? "leg" : "legs"}
-      </button>
+        <button type="button" className="analyse" disabled>
+          Analyse {legs.length} {legs.length === 1 ? "leg" : "legs"}
+        </button>
+      </span>
     </section>
   );
 }

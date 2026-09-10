@@ -62,14 +62,30 @@ check("addLeg appends a one-lot leg with no entry price", () => {
   assert.deepEqual(legs, [{ instrument: CALL, direction: 1, quantity: 1 }]);
 });
 
-check("addLeg never merges into an existing leg — two clicks make two legs", () => {
+check("addLeg increments an existing matching leg's quantity, not a second leg — Important #1", () => {
+  // Reviewed fix: a two-lot position built by clicking B twice must be ONE leg at
+  // quantity 2, not two one-lot legs — a `legs=` link naming `…:B2` has to survive a
+  // click-click-click-click round trip identically to one built the other way, and
+  // #6's in-place quantity editing needs one leg per contract to edit.
   const once = addLeg([], CALL, 1);
   const twice = addLeg(once, CALL, 1);
-  assert.equal(twice.length, 2);
-  assert.deepEqual(twice[0], twice[1]);
+  assert.equal(twice.length, 1, "one leg, not two");
+  assert.equal(twice[0]!.quantity, 2);
+});
+
+check("addLeg does not increment a leg held the other way — bought and sold stay separate", () => {
+  const bought = addLeg([], CALL, 1);
+  const both = addLeg(bought, CALL, -1);
+  assert.equal(both.length, 2);
+  assert.equal(both[0]!.quantity, 1);
+  assert.equal(both[1]!.quantity, 1);
 });
 
 check("dropFirst removes exactly one matching leg, not the whole position", () => {
+  // Two separate one-lot legs sharing an instrument and direction can still arrive off
+  // a decoded URL (`decodeLegs` never merges fragments), even though `addLeg` itself no
+  // longer produces this shape — so `dropFirst` still has to handle it: remove the
+  // first, leave the second lit.
   const twoLot = [
     { instrument: CALL, direction: 1 as const, quantity: 1 },
     { instrument: CALL, direction: 1 as const, quantity: 1 },
@@ -79,16 +95,46 @@ check("dropFirst removes exactly one matching leg, not the whole position", () =
   assert.equal(heldAt(after, CALL, 1), true, "one lot is still held");
 });
 
-check("dropFirst leaves other legs untouched, including a quantity-2 leg", () => {
+check("dropFirst decrements a quantity-2 leg by one lot rather than deleting it — Important #1", () => {
+  // THE BUG: a `legs=…:B2` link decoded straight (never having been through `addLeg`)
+  // used to lose both lots on one click, because `dropFirst` spliced the whole leg out
+  // without ever consulting `quantity`. It must come off one lot at a time, same as the
+  // sibling's `dropFirst` (`convex-hedge-payoff/web/lib/positions.ts:41-60`) — the
+  // difference from that file is deliberate: the sibling can repair a wrongly-split
+  // position from its Legs strip, and this ladder has no such strip, so `dropFirst`
+  // itself has to be the thing that never loses more than one lot.
   const legs: LegRequest[] = [
     { instrument: CALL, direction: 1, quantity: 2 },
     { instrument: PUT, direction: -1, quantity: 1 },
   ];
   const after = dropFirst(legs, CALL, 1);
-  // dropFirst removes one *leg*, not one lot off a leg's quantity — CONTEXT.md's
-  // quantity editing lives in the analyse tab (#6), not on this ladder.
+  assert.equal(after.length, 2, "the leg survives with one lot removed, not deleted outright");
+  assert.equal(after[0]!.quantity, 1);
+  assert.equal(after[1]!.instrument, PUT, "the other leg is untouched");
+});
+
+check("dropFirst removes a quantity-1 leg entirely — nothing left to decrement to", () => {
+  const legs: LegRequest[] = [
+    { instrument: CALL, direction: 1, quantity: 1 },
+    { instrument: PUT, direction: -1, quantity: 1 },
+  ];
+  const after = dropFirst(legs, CALL, 1);
   assert.equal(after.length, 1);
   assert.equal(after[0]!.instrument, PUT);
+});
+
+check("the full click cycle: B, B, S, S returns to empty, by way of one 2x leg", () => {
+  let legs = addLeg([], CALL, 1);
+  legs = addLeg(legs, CALL, 1);
+  assert.equal(legs.length, 1);
+  assert.equal(legs[0]!.quantity, 2);
+  legs = dropFirst(legs, CALL, 1);
+  assert.equal(legs.length, 1);
+  assert.equal(legs[0]!.quantity, 1, "one lot removed, one lot lit and held");
+  assert.equal(heldAt(legs, CALL, 1), true);
+  legs = dropFirst(legs, CALL, 1);
+  assert.equal(legs.length, 0);
+  assert.equal(heldAt(legs, CALL, 1), false);
 });
 
 check("dropFirst is a no-op when nothing matches", () => {
@@ -112,9 +158,15 @@ function computed(overrides: Partial<ComputedLeg>): ComputedLeg {
   };
 }
 
-/** One strike, both sides quoted — enough for every column to carry a distinct,
- *  recognisable value. Deliberately not exported: this fixture exists for this file
- *  alone, the way `payoff.test.ts`'s `worked()` exists for its own. */
+/**
+ * Two strikes: 77,000 with both sides quoted, so every quoted column carries a
+ * distinct, recognisable value; 78,000 with **only a call** — the pre-existing
+ * `leg === null` branch this ticket's `blankColumns`/`COLUMNS_PER_SIDE` edit touches,
+ * exercised here because a wrong hatched-cell count there misaligns every column of
+ * the table and the fingerprint exists specifically to catch that. Deliberately not
+ * exported: this fixture exists for this file alone, the way `payoff.test.ts`'s
+ * `worked()` exists for its own.
+ */
 function fixture(): ChainResponse {
   return {
     underlying: "BTC",
@@ -179,19 +231,56 @@ function fixture(): ChainResponse {
           }),
         },
       },
+      {
+        strike: 78000,
+        call: {
+          symbol: "C-BTC-78000-040926",
+          product_id: 3,
+          bid: 700,
+          ask: 730,
+          mark: 715,
+          bid_iv: 0.35,
+          ask_iv: 0.352,
+          mark_iv: 0.351,
+          delta: 0.41,
+          gamma: 0.00025,
+          theta: -4.1,
+          vega: 0.28,
+          rho: 0.09,
+          oi: 20,
+          oi_value_usd: null,
+          oi_change_usd_6h: null,
+          tick_size: 0.5,
+          computed: computed({
+            iv: 0.353,
+            iv_leg: "call",
+            delta: 0.4102,
+            gamma: 0.000251,
+            vega: 0.28,
+            theta: -4.1,
+            rho: 0.09,
+          }),
+        },
+        // No put listed at all — the hatched branch. See the fixture's own docstring
+        // for why this row exists.
+        put: null,
+      },
     ],
   };
 }
 
 /**
  * The exact `renderToStaticMarkup` output of the ladder **before this ticket touched
- * it** — captured by hand from a real render of the untouched component against
- * `fixture()`, then pasted here as a literal. Not regenerated from the current
- * component: that would make this test agree with whatever `ChainLadder.tsx` does
- * today by construction, which is the one thing a fingerprint must not do.
+ * it** — rendered from `git show 971ca4b:web/components/ChainLadder.tsx` (the commit
+ * immediately before P4's own) against `fixture()`, captured with `JSON.stringify` to
+ * survive the trip into this file byte-exact (a hand-retyped `&nbsp;` silently became a
+ * plain space once already — see the fix report), then pasted here as a literal. Not
+ * regenerated from the current component: that would make this test agree with
+ * whatever `ChainLadder.tsx` does today by construction, which is the one thing a
+ * fingerprint must not do.
  */
 const BEFORE_HTML =
-  "<div class=\"chain-wrap\"><table class=\"chain\"><caption class=\"sr-only\">BTC option chain expiring 04-09-2026, priced in USD. Calls on the left, strikes in the centre, puts on the right. The IV and delta columns are computed by this engine from the order book; the venue’s own figures are in each cell’s tooltip. A hatched cell means that side is not listed; an empty cell means the field could not be computed or was not priced; a zero means zero.</caption><thead><tr><th class=\"side-head side-call\" colSpan=\"9\">Calls</th><th class=\"side-head\">Strike</th><th class=\"side-head side-put\" colSpan=\"9\">Puts</th></tr><tr><th>OI</th><th title=\"Rho, per one percent. Computed here, not the venue’s.\">Rho</th><th title=\"Theta, one calendar day. Computed here, not the venue’s.\">Theta</th><th title=\"Vega, per volatility point. Computed here, not the venue’s.\">Vega</th><th title=\"Gamma, scaled by 10,000 so it is readable. Computed here.\">Gamma ×10⁴</th><th title=\"Delta, with respect to the forward. Computed here.\">Delta</th><th title=\"Implied volatility, solved from the out-of-the-money leg.\">IV</th><th title=\"Bid, in USD.\">Bid (USD)</th><th title=\"Ask, in USD.\">Ask (USD)</th><th style=\"text-align:center\">Strike</th><th title=\"Ask, in USD.\">Ask (USD)</th><th title=\"Bid, in USD.\">Bid (USD)</th><th title=\"Implied volatility, solved from the out-of-the-money leg.\">IV</th><th title=\"Delta, with respect to the forward. Computed here.\">Delta</th><th title=\"Gamma, scaled by 10,000 so it is readable. Computed here.\">Gamma ×10⁴</th><th title=\"Vega, per volatility point. Computed here, not the venue’s.\">Vega</th><th title=\"Theta, one calendar day. Computed here, not the venue’s.\">Theta</th><th title=\"Rho, per one percent. Computed here, not the venue’s.\">Rho</th><th>OI</th></tr></thead><tbody><tr class=\"at-the-money\"><td class=\"num itm\" title=\"C-BTC-77000-040926 · mark 1,225.00 · ours IV 37.12% (solved on the call) · Delta IV bid 37.00% · mark 37.10% · ask 37.20% · Delta Δ 0.520\">100</td><td class=\"num itm\" title=\"C-BTC-77000-040926 · mark 1,225.00 · ours IV 37.12% (solved on the call) · Delta IV bid 37.00% · mark 37.10% · ask 37.20% · Delta Δ 0.520\">0.12</td><td class=\"num itm\" title=\"C-BTC-77000-040926 · mark 1,225.00 · ours IV 37.12% (solved on the call) · Delta IV bid 37.00% · mark 37.10% · ask 37.20% · Delta Δ 0.520\">-5.50</td><td class=\"num itm\" title=\"C-BTC-77000-040926 · mark 1,225.00 · ours IV 37.12% (solved on the call) · Delta IV bid 37.00% · mark 37.10% · ask 37.20% · Delta Δ 0.520\">0.30</td><td class=\"num itm\" title=\"C-BTC-77000-040926 · mark 1,225.00 · ours IV 37.12% (solved on the call) · Delta IV bid 37.00% · mark 37.10% · ask 37.20% · Delta Δ 0.520\">3.12</td><td class=\"num itm\" title=\"C-BTC-77000-040926 · mark 1,225.00 · ours IV 37.12% (solved on the call) · Delta IV bid 37.00% · mark 37.10% · ask 37.20% · Delta Δ 0.520\">0.523</td><td class=\"num itm\" title=\"C-BTC-77000-040926 · mark 1,225.00 · ours IV 37.12% (solved on the call) · Delta IV bid 37.00% · mark 37.10% · ask 37.20% · Delta Δ 0.520\">37.12%</td><td class=\"num itm\" title=\"C-BTC-77000-040926 · mark 1,225.00 · ours IV 37.12% (solved on the call) · Delta IV bid 37.00% · mark 37.10% · ask 37.20% · Delta Δ 0.520\">1,200.00</td><td class=\"num itm\" title=\"C-BTC-77000-040926 · mark 1,225.00 · ours IV 37.12% (solved on the call) · Delta IV bid 37.00% · mark 37.10% · ask 37.20% · Delta Δ 0.520\">1,250.00</td><td class=\"strike\">77,000 ★</td><td class=\"num\" title=\"P-BTC-77000-040926 · mark 992.00 · ours IV 35.99% (solved on the put) · Delta IV bid 36.00% · mark 36.10% · ask 36.20% · Delta Δ -0.410\">1,005.25</td><td class=\"num\" title=\"P-BTC-77000-040926 · mark 992.00 · ours IV 35.99% (solved on the put) · Delta IV bid 36.00% · mark 36.10% · ask 36.20% · Delta Δ -0.410\">980.50</td><td class=\"num\" title=\"P-BTC-77000-040926 · mark 992.00 · ours IV 35.99% (solved on the put) · Delta IV bid 36.00% · mark 36.10% · ask 36.20% · Delta Δ -0.410\">35.99%</td><td class=\"num\" title=\"P-BTC-77000-040926 · mark 992.00 · ours IV 35.99% (solved on the put) · Delta IV bid 36.00% · mark 36.10% · ask 36.20% · Delta Δ -0.410\">-0.412</td><td class=\"num\" title=\"P-BTC-77000-040926 · mark 992.00 · ours IV 35.99% (solved on the put) · Delta IV bid 36.00% · mark 36.10% · ask 36.20% · Delta Δ -0.410\">1.23</td><td class=\"num\" title=\"P-BTC-77000-040926 · mark 992.00 · ours IV 35.99% (solved on the put) · Delta IV bid 36.00% · mark 36.10% · ask 36.20% · Delta Δ -0.410\">0.20</td><td class=\"num\" title=\"P-BTC-77000-040926 · mark 992.00 · ours IV 35.99% (solved on the put) · Delta IV bid 36.00% · mark 36.10% · ask 36.20% · Delta Δ -0.410\">-3.25</td><td class=\"num\" title=\"P-BTC-77000-040926 · mark 992.00 · ours IV 35.99% (solved on the put) · Delta IV bid 36.00% · mark 36.10% · ask 36.20% · Delta Δ -0.410\">-0.05</td><td class=\"num\" title=\"P-BTC-77000-040926 · mark 992.00 · ours IV 35.99% (solved on the put) · Delta IV bid 36.00% · mark 36.10% · ask 36.20% · Delta Δ -0.410\">50</td></tr></tbody></table></div>";
+  "<div class=\"chain-wrap\"><table class=\"chain\"><caption class=\"sr-only\">BTC option chain expiring 04-09-2026, priced in USD. Calls on the left, strikes in the centre, puts on the right. The IV and delta columns are computed by this engine from the order book; the venue’s own figures are in each cell’s tooltip. A hatched cell means that side is not listed; an empty cell means the field could not be computed or was not priced; a zero means zero.</caption><thead><tr><th class=\"side-head side-call\" colSpan=\"9\">Calls</th><th class=\"side-head\">Strike</th><th class=\"side-head side-put\" colSpan=\"9\">Puts</th></tr><tr><th>OI</th><th title=\"Rho, per one percent. Computed here, not the venue’s.\">Rho</th><th title=\"Theta, one calendar day. Computed here, not the venue’s.\">Theta</th><th title=\"Vega, per volatility point. Computed here, not the venue’s.\">Vega</th><th title=\"Gamma, scaled by 10,000 so it is readable. Computed here.\">Gamma ×10⁴</th><th title=\"Delta, with respect to the forward. Computed here.\">Delta</th><th title=\"Implied volatility, solved from the out-of-the-money leg.\">IV</th><th title=\"Bid, in USD.\">Bid (USD)</th><th title=\"Ask, in USD.\">Ask (USD)</th><th style=\"text-align:center\">Strike</th><th title=\"Ask, in USD.\">Ask (USD)</th><th title=\"Bid, in USD.\">Bid (USD)</th><th title=\"Implied volatility, solved from the out-of-the-money leg.\">IV</th><th title=\"Delta, with respect to the forward. Computed here.\">Delta</th><th title=\"Gamma, scaled by 10,000 so it is readable. Computed here.\">Gamma ×10⁴</th><th title=\"Vega, per volatility point. Computed here, not the venue’s.\">Vega</th><th title=\"Theta, one calendar day. Computed here, not the venue’s.\">Theta</th><th title=\"Rho, per one percent. Computed here, not the venue’s.\">Rho</th><th>OI</th></tr></thead><tbody><tr class=\"at-the-money\"><td class=\"num itm\" title=\"C-BTC-77000-040926 · mark 1,225.00 · ours IV 37.12% (solved on the call) · Delta IV bid 37.00% · mark 37.10% · ask 37.20% · Delta Δ 0.520\">100</td><td class=\"num itm\" title=\"C-BTC-77000-040926 · mark 1,225.00 · ours IV 37.12% (solved on the call) · Delta IV bid 37.00% · mark 37.10% · ask 37.20% · Delta Δ 0.520\">0.12</td><td class=\"num itm\" title=\"C-BTC-77000-040926 · mark 1,225.00 · ours IV 37.12% (solved on the call) · Delta IV bid 37.00% · mark 37.10% · ask 37.20% · Delta Δ 0.520\">-5.50</td><td class=\"num itm\" title=\"C-BTC-77000-040926 · mark 1,225.00 · ours IV 37.12% (solved on the call) · Delta IV bid 37.00% · mark 37.10% · ask 37.20% · Delta Δ 0.520\">0.30</td><td class=\"num itm\" title=\"C-BTC-77000-040926 · mark 1,225.00 · ours IV 37.12% (solved on the call) · Delta IV bid 37.00% · mark 37.10% · ask 37.20% · Delta Δ 0.520\">3.12</td><td class=\"num itm\" title=\"C-BTC-77000-040926 · mark 1,225.00 · ours IV 37.12% (solved on the call) · Delta IV bid 37.00% · mark 37.10% · ask 37.20% · Delta Δ 0.520\">0.523</td><td class=\"num itm\" title=\"C-BTC-77000-040926 · mark 1,225.00 · ours IV 37.12% (solved on the call) · Delta IV bid 37.00% · mark 37.10% · ask 37.20% · Delta Δ 0.520\">37.12%</td><td class=\"num itm\" title=\"C-BTC-77000-040926 · mark 1,225.00 · ours IV 37.12% (solved on the call) · Delta IV bid 37.00% · mark 37.10% · ask 37.20% · Delta Δ 0.520\">1,200.00</td><td class=\"num itm\" title=\"C-BTC-77000-040926 · mark 1,225.00 · ours IV 37.12% (solved on the call) · Delta IV bid 37.00% · mark 37.10% · ask 37.20% · Delta Δ 0.520\">1,250.00</td><td class=\"strike\">77,000 ★</td><td class=\"num\" title=\"P-BTC-77000-040926 · mark 992.00 · ours IV 35.99% (solved on the put) · Delta IV bid 36.00% · mark 36.10% · ask 36.20% · Delta Δ -0.410\">1,005.25</td><td class=\"num\" title=\"P-BTC-77000-040926 · mark 992.00 · ours IV 35.99% (solved on the put) · Delta IV bid 36.00% · mark 36.10% · ask 36.20% · Delta Δ -0.410\">980.50</td><td class=\"num\" title=\"P-BTC-77000-040926 · mark 992.00 · ours IV 35.99% (solved on the put) · Delta IV bid 36.00% · mark 36.10% · ask 36.20% · Delta Δ -0.410\">35.99%</td><td class=\"num\" title=\"P-BTC-77000-040926 · mark 992.00 · ours IV 35.99% (solved on the put) · Delta IV bid 36.00% · mark 36.10% · ask 36.20% · Delta Δ -0.410\">-0.412</td><td class=\"num\" title=\"P-BTC-77000-040926 · mark 992.00 · ours IV 35.99% (solved on the put) · Delta IV bid 36.00% · mark 36.10% · ask 36.20% · Delta Δ -0.410\">1.23</td><td class=\"num\" title=\"P-BTC-77000-040926 · mark 992.00 · ours IV 35.99% (solved on the put) · Delta IV bid 36.00% · mark 36.10% · ask 36.20% · Delta Δ -0.410\">0.20</td><td class=\"num\" title=\"P-BTC-77000-040926 · mark 992.00 · ours IV 35.99% (solved on the put) · Delta IV bid 36.00% · mark 36.10% · ask 36.20% · Delta Δ -0.410\">-3.25</td><td class=\"num\" title=\"P-BTC-77000-040926 · mark 992.00 · ours IV 35.99% (solved on the put) · Delta IV bid 36.00% · mark 36.10% · ask 36.20% · Delta Δ -0.410\">-0.05</td><td class=\"num\" title=\"P-BTC-77000-040926 · mark 992.00 · ours IV 35.99% (solved on the put) · Delta IV bid 36.00% · mark 36.10% · ask 36.20% · Delta Δ -0.410\">50</td></tr><tr class=\"\"><td class=\"num\" title=\"C-BTC-78000-040926 · mark 715.00 · ours IV 35.30% (solved on the call) · Delta IV bid 35.00% · mark 35.10% · ask 35.20% · Delta Δ 0.410\">20</td><td class=\"num\" title=\"C-BTC-78000-040926 · mark 715.00 · ours IV 35.30% (solved on the call) · Delta IV bid 35.00% · mark 35.10% · ask 35.20% · Delta Δ 0.410\">0.09</td><td class=\"num\" title=\"C-BTC-78000-040926 · mark 715.00 · ours IV 35.30% (solved on the call) · Delta IV bid 35.00% · mark 35.10% · ask 35.20% · Delta Δ 0.410\">-4.10</td><td class=\"num\" title=\"C-BTC-78000-040926 · mark 715.00 · ours IV 35.30% (solved on the call) · Delta IV bid 35.00% · mark 35.10% · ask 35.20% · Delta Δ 0.410\">0.28</td><td class=\"num\" title=\"C-BTC-78000-040926 · mark 715.00 · ours IV 35.30% (solved on the call) · Delta IV bid 35.00% · mark 35.10% · ask 35.20% · Delta Δ 0.410\">2.51</td><td class=\"num\" title=\"C-BTC-78000-040926 · mark 715.00 · ours IV 35.30% (solved on the call) · Delta IV bid 35.00% · mark 35.10% · ask 35.20% · Delta Δ 0.410\">0.410</td><td class=\"num\" title=\"C-BTC-78000-040926 · mark 715.00 · ours IV 35.30% (solved on the call) · Delta IV bid 35.00% · mark 35.10% · ask 35.20% · Delta Δ 0.410\">35.30%</td><td class=\"num\" title=\"C-BTC-78000-040926 · mark 715.00 · ours IV 35.30% (solved on the call) · Delta IV bid 35.00% · mark 35.10% · ask 35.20% · Delta Δ 0.410\">700.00</td><td class=\"num\" title=\"C-BTC-78000-040926 · mark 715.00 · ours IV 35.30% (solved on the call) · Delta IV bid 35.00% · mark 35.10% · ask 35.20% · Delta Δ 0.410\">730.00</td><td class=\"strike\">78,000</td><td class=\"blank\" title=\"No put listed at this strike\"></td><td class=\"blank\" title=\"No put listed at this strike\"></td><td class=\"blank\" title=\"No put listed at this strike\"></td><td class=\"blank\" title=\"No put listed at this strike\"></td><td class=\"blank\" title=\"No put listed at this strike\"></td><td class=\"blank\" title=\"No put listed at this strike\"></td><td class=\"blank\" title=\"No put listed at this strike\"></td><td class=\"blank\" title=\"No put listed at this strike\"></td><td class=\"blank\" title=\"No put listed at this strike\"></td></tr></tbody></table></div>";
 
 check("THE BEFORE PIN: the untouched ladder matches the literal captured pre-ticket", () => {
   const html = renderToStaticMarkup(<ChainLadder chain={fixture()} />);
@@ -199,15 +288,18 @@ check("THE BEFORE PIN: the untouched ladder matches the literal captured pre-tic
 });
 
 /**
- * Undoes every trace of the one new column this ticket adds — the two `td.picks`
- * cells, the two `th.picks-head` header cells, and the `colSpan` each side's banner
- * grew by one to cover it — so what is left can be compared against `BEFORE_HTML`
- * byte for byte. Nothing else this ticket touches would match any of these three
- * patterns, which is what makes the comparison a fingerprint of everything *else*.
+ * Undoes every trace of the one new column this ticket adds — the quoted branch's
+ * `td.picks` cells, the hatched branch's `td.picks.blank` cells (`class="picks
+ * blank"`, distinct from an ordinary hatched cell's bare `class="blank"` precisely so
+ * this regex can tell the two apart and strip only the one P4 added), the two
+ * `th.picks-head` header cells, and the `colSpan` each side's banner grew by one to
+ * cover it — so what is left can be compared against `BEFORE_HTML` byte for byte.
+ * Nothing else this ticket touches would match any of these four patterns, which is
+ * what makes the comparison a fingerprint of everything *else*.
  */
 function withoutPicks(html: string): string {
   return html
-    .replace(/<td class="picks">.*?<\/td>/g, "")
+    .replace(/<td class="picks[^"]*"[^>]*>.*?<\/td>/g, "")
     .replace(/<th class="picks-head">Pick<\/th>/g, "")
     .replace(/colSpan="10"/g, 'colSpan="9"');
 }
@@ -219,12 +311,15 @@ check("THE FINGERPRINT: with the two new buttons stripped out, the ladder is unc
   assert.equal(withoutPicks(html), BEFORE_HTML);
 });
 
-check("a strike with no legs held renders four unlit buttons", () => {
+check("no legs held renders six unlit buttons — none at all on the hatched put", () => {
+  // Six, not four: the 77,000 row is both-sided (four buttons) and the 78,000 row is
+  // call-only (two buttons, none on the hatched put — there is nothing to buy or sell
+  // where nothing is listed).
   const html = renderToStaticMarkup(
     <ChainLadder chain={fixture()} legs={[]} onPick={() => {}} />,
   );
   const pressed = [...html.matchAll(/aria-pressed="(true|false)"/g)].map((m) => m[1]);
-  assert.deepEqual(pressed, ["false", "false", "false", "false"]);
+  assert.deepEqual(pressed, ["false", "false", "false", "false", "false", "false"]);
 });
 
 check('a held leg lights its button, aria-pressed="true", and only that one', () => {
