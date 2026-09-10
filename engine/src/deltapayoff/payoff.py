@@ -43,17 +43,20 @@ WINDOW_SIGMAS = 3.0
 FALLBACK_LOG_HALF_WIDTH = 0.05
 
 
-#: How close two prices have to be before they are the same price. Prices here run to
-#: five figures in USD and are quoted to two decimals, so a nanodollar is far below
-#: anything the venue can express and far above the rounding in a linear solve.
+#: How close two prices have to be before they are the same price. `assumed`: prices
+#: here run to five figures in USD and are quoted to two decimals, so a nanodollar is
+#: far below anything the venue can express and far above the rounding in a linear
+#: solve. Nothing measured it; it is a floor picked from those two known scales.
 PRICE_TOLERANCE = 1e-9
 
 
-#: How close a P&L has to be to zero before it *is* zero. A tenth of a millionth of a
-#: dollar: far below the cent these prices are quoted in, and comfortably above the
-#: rounding a sum of five-figure strikes accumulates. It decides whether a curve that
-#: grazes the axis is one breakeven or two, so it is a named number rather than an
-#: `== 0.0` nobody would think to question.
+#: How close a P&L has to be to zero before it *is* zero. `assumed`, on the same two
+#: scales as `PRICE_TOLERANCE`: a millionth of a dollar is far below the cent these
+#: prices are quoted in and comfortably above the rounding a sum of five-figure strikes
+#: accumulates. Looser than `PRICE_TOLERANCE` because a P&L is a difference of products
+#: of those five-figure numbers where a price is one of them. It decides whether a curve
+#: grazing the axis is one breakeven or two, so it is named rather than an `== 0.0`
+#: nobody would think to question.
 PNL_TOLERANCE = 1e-6
 
 
@@ -62,11 +65,15 @@ PNL_TOLERANCE = 1e-6
 #: the sense that it is a legibility choice with nothing downstream depending on it.
 TABLE_TARGET_ROWS = 25
 
-#: The round numbers a step is allowed to be, times a power of ten. A trader reads
-#: 500 and 2,500; nobody reads 291.67. Not a fixed step, which is what the sibling uses:
-#: its 50 is NIFTY's uniform strike grid, and BTC's is `measured` at 100-200 near the
-#: money, 500 through the belly and 1,000 in the wings, so no one number is right at
-#: both ends of a chain.
+#: The round numbers a step is allowed to be, times a power of ten. `assumed` — a
+#: legibility choice: a trader reads 500 and 2,500, and nobody reads 291.67.
+#:
+#: Sized to the frame rather than fixed, which is what the sibling does. Its 50 is
+#: NIFTY's uniform grid; BTC's grid is not uniform. `measured` over
+#: `engine/tests/fixtures/tickers-btc-04-09-2026.json` (65 strikes, 58,000 to 90,000,
+#: spot 77,568): gaps of 100 and 200 between 76,500 and 79,200, 500 through the belly
+#: (36 of the 64 gaps) and 1,000 out to both wings (11). No single step is right at both
+#: ends of that chain.
 _STEP_MANTISSAS = (1.0, 2.0, 2.5, 5.0)
 
 
@@ -144,8 +151,10 @@ def end_slopes(legs: Sequence[PayoffLeg]) -> tuple[float, float]:
     two large numbers loses the precision that decides whether a maximum is capped or
     unbounded, and that decision is `null` against a number on screen.
     """
-    calls = sum(leg.weight for leg in legs if leg.is_call)
-    puts = sum(leg.weight for leg in legs if not leg.is_call)
+    # `float(...)` because `sum()` over an empty generator returns `int` — an all-call
+    # strategy would otherwise put a `0` where the contract's type says `0.0`.
+    calls = float(sum(leg.weight for leg in legs if leg.is_call))
+    puts = float(sum(leg.weight for leg in legs if not leg.is_call))
     return -puts, calls
 
 
@@ -163,8 +172,9 @@ def suggested_window(
     otherwise. The ends are `anchor * exp(-/+3 sigma sqrt(t))`, three deviations of the
     **log** price, which is the quantity Black-76 models as normal. The additive reading
     `anchor * (1 -/+ 3 sigma sqrt(t))` is the more literal one and is broken: it puts the
-    low edge below zero once `sigma * sqrt(t)` passes a third, an ordinary 82-day expiry
-    at the 37% volatility this chain runs at. `docs/payoff-contract.md` now says so too.
+    low edge below zero once `sigma * sqrt(t)` passes a third — 70% volatility a quarter
+    out (`0.70 * sqrt(0.25) = 0.35`), and 296 days at 37%. `docs/payoff-contract.md`
+    carries the same ruling.
 
     **No drift term.** No `- sigma^2 t / 2`: this is a viewing frame, not a probability
     statement, and the correction would shift it without telling the reader anything.
@@ -183,11 +193,17 @@ def suggested_window(
     metrics do not need a model and the chart still has to open on something.
     """
     strikes = [leg.strike for leg in legs]
-    centre = anchor if anchor is not None and anchor > 0.0 else None
-    if centre is None:
+    if anchor is not None and anchor <= 0.0:
+        # `null` is not `0`. An absent anchor is an unfitted chain and is handled below;
+        # a zero or negative one is a forward or a spot that came out wrong upstream, and
+        # substituting for it quietly would frame the chart on a fabrication.
+        raise ValueError(f"an anchor must be a positive price; got {anchor}")
+    if anchor is None:
         if not strikes:
             raise ValueError("a window needs an anchor or at least one strike")
         centre = (min(strikes) + max(strikes)) / 2
+    else:
+        centre = anchor
 
     half_width = 0.0
     if atm_iv is not None and years is not None and atm_iv > 0.0 and years > 0.0:
@@ -226,12 +242,17 @@ def corner_prices(legs: Sequence[PayoffLeg], window: Window) -> list[float]:
     The kinks are the distinct strikes and nothing else: between two of them every leg
     is linear, so the segment between is exactly straight. The window ends are added
     because a chart needs two endpoints to draw between and because the reader is told
-    where the engine suggests opening — outside them the two slopes take over.
+    where the engine suggests opening.
+
+    **Every strike, including the ones outside the window.** The window is a suggestion
+    and not a clamp, and `slope_left` and `slope_right` are read off the whole leg mix —
+    so dropping a strike the frame does not reach leaves a ray that starts at the wrong
+    P&L and runs forever. On the butterfly framed 76,000 to 78,000 that ray says 1,100 at
+    82,000 where the strategy is worth -900, and it draws perfectly plausibly. Carrying
+    the outliers costs one point each and makes the two rays unconditionally exact,
+    which is what `docs/payoff-contract.md` promises the reader who zooms out.
     """
-    strikes = [
-        leg.strike for leg in legs if window.low <= leg.strike <= window.high
-    ]
-    return _ascending([window.low, *strikes, window.high])
+    return _ascending([window.low, *(leg.strike for leg in legs), window.high])
 
 
 def payoff_curve(legs: Sequence[PayoffLeg], window: Window) -> Curve:
@@ -379,7 +400,7 @@ def payoff_table(legs: Sequence[PayoffLeg], window: Window) -> list[PayoffPoint]
     """
     step = readable_step(window.high - window.low)
     first = math.ceil(window.low / step) * step
-    rows = math.floor((window.high - first) / step + PRICE_TOLERANCE) + 1
+    rows = math.floor((window.high + PRICE_TOLERANCE - first) / step) + 1
     # Indexed off the first row rather than accumulated, which would drift by a little
     # more with every addition, and clamped because `ceil` on a ratio can land a
     # hair outside the frame it was derived from.
@@ -422,7 +443,11 @@ def position_greeks(legs: Sequence[PayoffLeg]) -> Greeks | None:
     """
     if not legs or any(leg.greeks is None for leg in legs):
         return None
-    scaled = [scale_greeks(leg.greeks, leg.weight) for leg in legs if leg.greeks]
+    scaled = [
+        scale_greeks(leg.greeks, leg.weight)
+        for leg in legs
+        if leg.greeks is not None  # already guaranteed above; here for the type checker
+    ]
     return Greeks(
         delta=sum(one.delta for one in scaled),
         gamma=sum(one.gamma for one in scaled),

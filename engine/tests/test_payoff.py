@@ -26,11 +26,12 @@ from deltapayoff.payoff import (
     payoff_table,
     pnl_at_expiry,
     position_greeks,
+    readable_step,
     scale_greeks,
     strategy_metrics,
     suggested_window,
 )
-from deltapayoff.payoff_models import Greeks, Window
+from deltapayoff.payoff_models import Curve, Greeks, Window
 
 # `docs/payoff-contract.md`'s worked example: one BTC 77000 call, bought at 1240.
 CONTRACT_CALL = PayoffLeg(
@@ -260,6 +261,10 @@ def test_a_tail_lying_flat_on_zero_is_one_breakeven_and_not_a_range() -> None:
     assert metrics.breakevens == [77_000.0]
     assert metrics.max_loss == -1000.0
     assert metrics.max_profit == 0.0
+    # A real zero, and not `None`: the best this does is break even, and 0 / 1,000 is a
+    # ratio that exists. `None` would say the ratio is meaningless, which is a different
+    # and better-sounding claim.
+    assert metrics.reward_risk == 0.0
 
 
 def test_a_strategy_that_cannot_lose_gets_no_ratio_rather_than_a_division_by_zero() -> (
@@ -463,3 +468,123 @@ def test_the_payoff_core_imports_nothing_that_could_reach_out() -> None:
         "dataclasses",
         ".payoff_models",
     }
+
+
+def read_off_the_chart(curve: Curve, price: float) -> float:
+    """What the browser draws at `price`, given only what the contract sends it.
+
+    Straight segments between the corners, and the two end slopes extended beyond them —
+    `docs/payoff-contract.md`'s rendering rule, written out so a test can hold the engine
+    to the promise that those rays are exact **however far the reader zooms**. Nothing
+    here consults the legs, which is the point: it sees exactly what the wire carries.
+    """
+    if price <= curve.corners[0].price:
+        first = curve.corners[0]
+        return first.pnl + curve.slope_left * (price - first.price)
+    if price >= curve.corners[-1].price:
+        last = curve.corners[-1]
+        return last.pnl + curve.slope_right * (price - last.price)
+    for left, right in zip(curve.corners, curve.corners[1:], strict=False):
+        if left.price <= price <= right.price:
+            share = (price - left.price) / (right.price - left.price)
+            return left.pnl + share * (right.pnl - left.pnl)
+    raise AssertionError("the corners did not cover the price")
+
+
+def test_the_rays_stay_exact_on_a_window_narrower_than_the_strikes() -> None:
+    """A frame that holds none of the butterfly's wings, and a chart still correct
+    outside it.
+
+    `docs/payoff-contract.md` calls the window a suggestion rather than a clamp and
+    promises the two rays are exact however far out the reader zooms. Dropping the
+    corners that fall outside the frame breaks that quietly: the slopes are still read
+    off the whole leg mix, so the ray leaving 78,000 would run flat at 1,100 forever
+    while the strategy is worth **-900** at 82,000, and the ray leaving 76,000 would say
+    1,100 at 75,000 where the strategy is worth **100**. Both worked by hand from the
+    four leg prices; both draw perfectly plausibly.
+    """
+    curve = payoff_curve(BUTTERFLY, Window(low=76_000.0, high=78_000.0))
+
+    assert read_off_the_chart(curve, 75_000.0) == 100.0
+    assert read_off_the_chart(curve, 82_000.0) == -900.0
+    assert [point.price for point in curve.corners] == [
+        74_000.0, 76_000.0, 77_000.0, 78_000.0, 80_000.0,
+    ]
+
+
+def test_the_step_ladder_has_a_rung_between_two_and_five() -> None:
+    """55 across two dozen rows wants 2.29, and the answer is **2.5**, not 5.
+
+    Without the 2.5 rung every frame in that band doubles its step and halves its rows,
+    which is where a table stops being worth reading. The rungs either side are pinned
+    with it: 200 for a 4,600-wide frame and 1,000 for a 20,000-wide one, both worked by
+    hand from `span / 24`.
+    """
+    assert readable_step(55.0) == 2.5
+    assert readable_step(4_600.0) == 200.0
+    assert readable_step(20_000.0) == 1000.0
+
+
+def test_a_flat_segment_on_zero_between_two_strikes_gives_its_two_ends() -> None:
+    """A call ladder priced so the middle of the curve lies exactly on the axis.
+
+    Buy the 74000 call for 4,000, sell the 76000 call for 3,000, buy the 78000 call for
+    1,000 — 2,000 paid out, which is exactly the 76,000 - 74,000 the first spread is
+    worth, so the P&L is **flat at zero the whole way from 76,000 to 78,000**. Worked by
+    hand: -2,000 anywhere below 74,000, zero across the shelf, and rising a dollar for a
+    dollar above 78,000.
+
+    Two breakevens, not a range and not the one crossing a sign test would find, because
+    the shelf never changes sign. They are the two prices at which the strategy stops
+    breaking even and starts doing something, which is what a reader wants marked.
+    """
+    call_ladder = [
+        PayoffLeg(
+            strike=74_000.0, is_call=True, direction=1, quantity=1, entry_price=4000.0
+        ),
+        PayoffLeg(
+            strike=76_000.0, is_call=True, direction=-1, quantity=1, entry_price=3000.0
+        ),
+        PayoffLeg(
+            strike=78_000.0, is_call=True, direction=1, quantity=1, entry_price=1000.0
+        ),
+    ]
+
+    metrics = strategy_metrics(call_ladder)
+
+    assert metrics.breakevens == [76_000.0, 78_000.0]
+    assert pnl_at_expiry(77_000.0, call_ladder) == 0.0
+    assert metrics.max_loss == -2000.0
+    assert metrics.max_profit is None
+
+
+def test_a_strike_landing_on_a_window_end_is_one_corner_and_not_two() -> None:
+    """The strangle framed by its own widening, where `low` **is** the 70,000 strike.
+
+    `Curve` refuses corners that do not ascend **strictly**, so a window end and a strike
+    at the same price would raise at the route rather than draw — a 500 for a strategy
+    whose only crime is having its wing where the frame ends. Which is the ordinary case,
+    not a corner one: `suggested_window` widens to the strikes, so the outermost strike
+    sits exactly on an end whenever it falls outside three sigma.
+    """
+    window = suggested_window(SHORT_STRANGLE, anchor=80_000.0, atm_iv=0.10, years=0.01)
+    assert (window.low, window.high) == (70_000.0, 85_000.0)
+
+    curve = payoff_curve(SHORT_STRANGLE, window)
+
+    assert [(point.price, point.pnl) for point in curve.corners] == [
+        (70_000.0, 2000.0),
+        (85_000.0, 2000.0),
+    ]
+
+
+def test_an_anchor_of_zero_is_refused_rather_than_treated_as_an_absent_one() -> None:
+    """`null` is not `0`, here as everywhere else on this project.
+
+    An absent anchor is an unfitted chain and falls back to the strikes. A zero one is a
+    forward or a spot that came out wrong upstream, and framing the chart on it — or
+    silently substituting the strikes for it — would put a plausible axis under a
+    fabrication.
+    """
+    with pytest.raises(ValueError, match="positive price"):
+        suggested_window([CONTRACT_CALL], anchor=0.0, atm_iv=0.40, years=0.25)

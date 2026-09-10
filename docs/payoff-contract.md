@@ -172,12 +172,13 @@ on both.
 
 `window` is the range the engine suggests opening on: **±3 standard deviations** from the
 at-the-money implied volatility and the time to expiry, widened to include every strike carrying
-a leg. The edges are `anchor · e^(±3σ√t)` — three deviations of the **log** price, the quantity
-Black-76 models as normal — because the additive reading `anchor · (1 ± 3σ√t)` puts the low edge
-below zero once `σ√t` passes a third, which at the 37% volatility this chain runs at is an
-ordinary 82-day expiry. `low < high`. A fixed percentage does not transfer from an index either —
-at 37% volatility ±6% is 1.6 sigma on a 3.8-day expiry and 0.33 sigma at 86 days. It is a
-suggestion, not a clamp: the corners and the two slopes describe the curve everywhere.
+a leg — the **anchor** being the fitted forward where there is one and spot otherwise. The edges
+are `anchor · e^(±3σ√t)`, three deviations of the **log** price, which is the quantity Black-76
+models as normal: the additive reading `anchor · (1 ± 3σ√t)` puts the low edge below zero once
+`σ√t` passes a third — 70% volatility a quarter out, and 296 days at the 37% below.
+`low < high`. A fixed percentage does not transfer from an index either — at 37% volatility ±6%
+is 1.6 sigma on a 3.8-day expiry and 0.33 sigma at 86 days. It is a suggestion, not a clamp: the
+corners and the two slopes describe the curve everywhere.
 
 **One line only — P&L at expiry.** It depends on the strikes and what was paid, neither of which
 changes, so a live tab moves the forward, spot, the Greeks and the metrics while the curve sits
