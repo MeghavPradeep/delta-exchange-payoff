@@ -23,7 +23,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import AnalyseView from "@/components/AnalyseView";
 import { unitFactor, unitLabel } from "@/lib/format";
-import type { AnalyseResponse } from "@/lib/payoff";
+import type { AnalyseResponse, LegRequest } from "@/lib/payoff";
 
 let failures = 0;
 
@@ -93,7 +93,23 @@ function strangle(): AnalyseResponse {
   };
 }
 
-const IDLE = { analysis: null, problem: null, legsError: null, busy: false, legCount: 0 };
+/** The two legs of the strangle above, as the *request* they were built from — what the
+ *  reader is editing, which is not the same object as the engine's echo of them. */
+const STRANGLE_LEGS: LegRequest[] = [
+  { instrument: "DELTA-BTC-20260904-74000-P-USD", direction: -1, quantity: 1 },
+  { instrument: "DELTA-BTC-20260904-80000-C-USD", direction: -1, quantity: 1 },
+];
+
+const IDLE = {
+  legs: [] as LegRequest[],
+  analysis: null,
+  problem: null,
+  legsError: null,
+  busy: false,
+  minute: null,
+  receivedAt: null,
+  onLegsChange: () => {},
+};
 
 console.log("format / unitFactor and unitLabel — the toggle, as one rule");
 
@@ -118,7 +134,7 @@ check("a semantic refusal is shown in full, and no chart is drawn beside it", ()
   const html = renderToStaticMarkup(
     <AnalyseView
       {...IDLE}
-      legCount={2}
+      legs={STRANGLE_LEGS}
       problem="the legs span two expiries: 04-09-2026 and 11-09-2026"
     />,
   );
@@ -154,7 +170,7 @@ check("a link with no legs asks for some rather than drawing a flat line at zero
 });
 
 check("an analysis draws the curve, the metrics and the three tabs", () => {
-  const html = renderToStaticMarkup(<AnalyseView {...IDLE} legCount={2} analysis={strangle()} />);
+  const html = renderToStaticMarkup(<AnalyseView {...IDLE} legs={STRANGLE_LEGS} analysis={strangle()} />);
   assert.match(html, /<polyline/, "the curve");
   assert.match(html, /unlimited/, "max loss, as a word");
   assert.equal([...html.matchAll(/role="tab"/g)].length, 3);
@@ -162,7 +178,7 @@ check("an analysis draws the curve, the metrics and the three tabs", () => {
 });
 
 check("THE DEFAULT: the toggle is on, so every money figure is per contract", () => {
-  const html = renderToStaticMarkup(<AnalyseView {...IDLE} legCount={2} analysis={strangle()} />);
+  const html = renderToStaticMarkup(<AnalyseView {...IDLE} legs={STRANGLE_LEGS} analysis={strangle()} />);
   assert.match(html, /USD\/contract/, "the unit is named where the figures are");
   // 1,400 per underlying is 1.40 per contract, and the per-underlying figure must not
   // be on screen at the same time claiming to be the same thing.
@@ -172,12 +188,12 @@ check("THE DEFAULT: the toggle is on, so every money figure is per contract", ()
 });
 
 check("the 1,000x note is on screen, because the ladder behind it disagrees", () => {
-  const html = renderToStaticMarkup(<AnalyseView {...IDLE} legCount={2} analysis={strangle()} />);
+  const html = renderToStaticMarkup(<AnalyseView {...IDLE} legs={STRANGLE_LEGS} analysis={strangle()} />);
   assert.match(html, /1,000/);
 });
 
 check("what it was priced against is shown — forward, discount, spot, and the minute", () => {
-  const html = renderToStaticMarkup(<AnalyseView {...IDLE} legCount={2} analysis={strangle()} />);
+  const html = renderToStaticMarkup(<AnalyseView {...IDLE} legs={STRANGLE_LEGS} analysis={strangle()} />);
   assert.match(html, /77,609\.40|77609\.4/, "the forward");
   assert.match(html, /77,543\.00|77543/, "spot");
   assert.match(html, /2026-09-04/, "the minute it is as of");
@@ -189,7 +205,7 @@ check("an unfitted chain still draws the curve — a P&L at expiry needs no mode
   unfitted.discount = null;
   unfitted.total_greeks = null;
   unfitted.legs = unfitted.legs.map((leg) => ({ ...leg, iv: null, greeks: null }));
-  const html = renderToStaticMarkup(<AnalyseView {...IDLE} legCount={2} analysis={unfitted} />);
+  const html = renderToStaticMarkup(<AnalyseView {...IDLE} legs={STRANGLE_LEGS} analysis={unfitted} />);
   assert.match(html, /<polyline/);
   assert.doesNotMatch(html, /NaN|Infinity/);
 });

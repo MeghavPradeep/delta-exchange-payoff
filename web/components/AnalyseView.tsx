@@ -3,12 +3,20 @@
 import { useState } from "react";
 
 import GreeksTable from "@/components/GreeksTable";
+import LegEditor from "@/components/LegEditor";
 import MetricsPanel from "@/components/MetricsPanel";
 import PayoffChart from "@/components/PayoffChart";
 import PayoffTable from "@/components/PayoffTable";
 import ThemeToggle from "@/components/ThemeToggle";
-import { formatFetchedAt, formatSpot, formatStrike, unitFactor, unitLabel } from "@/lib/format";
-import type { AnalyseResponse } from "@/lib/payoff";
+import {
+  formatFetchedAt,
+  formatFetchedClock,
+  formatSpot,
+  formatStrike,
+  unitFactor,
+  unitLabel,
+} from "@/lib/format";
+import type { AnalyseResponse, LegRequest } from "@/lib/payoff";
 
 const TABS = [
   { key: "pnl", label: "P&L" },
@@ -39,14 +47,29 @@ type Tab = (typeof TABS)[number]["key"];
  * screen with the money in one unit and the exposures in another is worse than either.
  * `unitFactor` and `unitLabel` are the whole of it, and the factor comes from the
  * response's own `contract_value`.
+ *
+ * **The legs are the input, not an echo of the answer.** `legs` here is the strategy the
+ * reader is editing — what will be asked next — while `analysis.legs` is what the engine
+ * made of the last one, with `entry_price` filled in from the book. The editor is bound
+ * to the former, so a price the engine crossed the spread for never overwrites a price
+ * somebody typed.
+ *
+ * **The as-of chip says which kind of tab this is**, and it renders before any answer
+ * has arrived, because "live" and "stored" are facts about the link rather than about
+ * the response.
  */
 export default function AnalyseView({
+  legs,
   analysis,
   problem,
   legsError,
   busy,
-  legCount,
+  minute,
+  receivedAt,
+  onLegsChange,
 }: {
+  /** The strategy as it is being edited — the request, not the response's echo. */
+  legs: LegRequest[];
   analysis: AnalyseResponse | null;
   /** A refusal, or an unreachable engine, already flattened to one sentence. */
   problem: string | null;
@@ -54,8 +77,13 @@ export default function AnalyseView({
    * the fragment and the part of it that was wrong. Never treated as "no strategy". */
   legsError: string | null;
   busy: boolean;
-  /** How many legs the link named, which is knowable even when nothing has answered. */
-  legCount: number;
+  /** The stored minute this tab is pinned to, or `null` for live. Decides the chip, and
+   *  upstream it decides whether anything re-asks at all. */
+  minute: string | null;
+  /** When the last answer arrived, ISO 8601 UTC — the chip's "updated". `null` before
+   *  the first one. Passed in rather than read here: this component never sees a clock. */
+  receivedAt: string | null;
+  onLegsChange: (legs: LegRequest[]) => void;
 }) {
   const [tab, setTab] = useState<Tab>("pnl");
   const [perContract, setPerContract] = useState(true);
@@ -77,9 +105,25 @@ export default function AnalyseView({
         <div className="stat lead">
           <span className="stat-label">Strategy</span>
           <span className="stat-value">
-            {legCount} {legCount === 1 ? "leg" : "legs"}
+            {legs.length} {legs.length === 1 ? "leg" : "legs"}
           </span>
         </div>
+
+        {minute === null ? (
+          <span
+            className="chip live"
+            title="This link names no minute, so it re-asks once a second: the forward marker, spot, the Greeks and the metrics follow the market. The curve stays where it is, unless a leg is being priced from the book."
+          >
+            live{receivedAt === null ? "" : ` \u00b7 updated ${formatFetchedClock(receivedAt)}`}
+          </span>
+        ) : (
+          <span
+            className="chip"
+            title="This link names a stored minute, so it never re-asks. A stored minute is a fixed set of numbers."
+          >
+            stored minute {formatFetchedAt(minute)}
+          </span>
+        )}
 
         {analysis ? (
           <>
@@ -121,7 +165,13 @@ export default function AnalyseView({
 
         {problem ? <p className="notice error">{problem}</p> : null}
 
-        {legCount === 0 && legsError === null ? (
+        {legs.length > 0 ? (
+          <div className="analyse-legs">
+            <LegEditor legs={legs} onLegsChange={onLegsChange} />
+          </div>
+        ) : null}
+
+        {legs.length === 0 && legsError === null ? (
           <p className="notice">
             This link names no legs. Build a strategy on the chain — the B and S beside
             every strike — and press Analyse. An empty strategy is a flat line at zero.
@@ -162,7 +212,10 @@ export default function AnalyseView({
                   two end slopes outside them — exact at every price, which is why this
                   chart zooms out as far as you drag it. The forward is marked, and so is
                   every breakeven inside the window. The line does not move: it depends on
-                  the strikes and what was paid, and neither of those changes.
+                  the strikes and what was paid, and neither of those changes — with one
+                  exception worth knowing on a live tab. A leg with no price of its own is
+                  filled from the book on every response, by crossing the spread, so its
+                  corners shift as the quotes do. Type a price into the leg to pin it.
                 </p>
               ) : null}
 

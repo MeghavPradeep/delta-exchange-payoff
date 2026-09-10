@@ -3,14 +3,14 @@
 import { useEffect, useState } from "react";
 
 import AnalyseView from "@/components/AnalyseView";
+import { subscribeAnalysis } from "@/lib/analyse-live";
 import {
   ContractViolationError,
   ENGINE_URL,
   EngineResponseError,
   EngineUnreachableError,
-  postAnalyse,
 } from "@/lib/engine";
-import { LegsUrlError, decodeLegs } from "@/lib/legs-url";
+import { LegsUrlError, analyseHref, decodeLegs } from "@/lib/legs-url";
 import type { AnalyseResponse, LegRequest } from "@/lib/payoff";
 
 /**
@@ -51,12 +51,28 @@ function problemOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** The same settle `ChainScreen` and `VolatilityScreen` use, and for the same reason. */
+const URL_SETTLE_MS = 200;
+
 /**
- * The analyse tab: one request, and whatever came back.
+ * The analyse tab: the strategy, kept up to date in both directions.
  *
- * **One request, not a timer.** A link naming a minute is a fixed set of numbers, and a
- * live one keeping up with the market is #6's ticket, not this one — so this screen asks
- * once and renders the answer. That also keeps it clear of the wall clock entirely.
+ * **Live when the link names no minute, static when it names one.** `subscribeAnalysis`
+ * holds that rule and the reasoning for it; this screen holds the state it produces. The
+ * timer is not here, which is what keeps this component clear of the wall clock and the
+ * rule testable on a request count rather than on a duration.
+ *
+ * **The legs are state, and the address bar follows them.** They start as whatever the
+ * link decoded to and are edited from `LegEditor` after that. `window.history.replaceState`
+ * rather than a router push, for `ChainScreen`'s and `VolatilityScreen`'s reason: a
+ * strategy being edited must not fill the back button, and the link has to stay copyable
+ * without the page reloading under the reader. Same 200 ms settle as those two — Firefox
+ * and Safari throttle `replaceState`, and a quantity being nudged is a drag.
+ *
+ * **A new strategy clears the old analysis.** The curve on screen belongs to the legs it
+ * was asked for; leaving it up while a different strategy is in flight would draw one
+ * position and label it another. A poll of the *same* strategy does not go through here
+ * — only `legs` and `minute` restart the subscription — so the live case does not flash.
  *
  * The fetching is all that lives here; `AnalyseView` renders the result and is testable
  * without a browser because of that split.
@@ -73,38 +89,60 @@ export default function AnalyseScreen({
   minute: string | null;
 }) {
   const [strategy] = useState(() => decodeInitial(legsParam));
+  const [legs, setLegs] = useState<LegRequest[]>(strategy.legs);
   const [analysis, setAnalysis] = useState<AnalyseResponse | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [receivedAt, setReceivedAt] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (strategy.legs.length === 0) return;
-    let dropped = false;
+    setAnalysis(null);
+    setProblem(null);
+    setReceivedAt(null);
+    if (legs.length === 0) {
+      setBusy(false);
+      return;
+    }
     setBusy(true);
-    postAnalyse(strategy.legs, minute)
-      .then((next) => {
-        if (dropped) return;
+    return subscribeAnalysis(legs, minute, {
+      onAnalysis: (next, at) => {
         setAnalysis(next);
         setProblem(null);
-      })
-      .catch((err) => {
-        if (!dropped) setProblem(problemOf(err));
-      })
-      .finally(() => {
-        if (!dropped) setBusy(false);
-      });
-    return () => {
-      dropped = true;
-    };
-  }, [strategy, minute]);
+        setReceivedAt(at);
+        setBusy(false);
+      },
+      // A refusal replaces the analysis rather than sitting beside it — `AnalyseView`'s
+      // own rule. The engine has declined to answer for *these* legs, so there is no
+      // curve that belongs to them, and a poll that starts failing is not a licence to
+      // keep showing the last one as though it were current.
+      onError: (err) => {
+        setAnalysis(null);
+        setProblem(problemOf(err));
+        setBusy(false);
+      },
+    });
+  }, [legs, minute]);
+
+  // The address bar follows the strategy; it never drives it after the first render.
+  useEffect(() => {
+    const href = analyseHref(legs, minute);
+    if (`${window.location.pathname}${window.location.search}` === href) return;
+    const timer = window.setTimeout(() => {
+      window.history.replaceState(null, "", href);
+    }, URL_SETTLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [legs, minute]);
 
   return (
     <AnalyseView
+      legs={legs}
       analysis={analysis}
       problem={problem}
       legsError={strategy.error}
       busy={busy}
-      legCount={strategy.legs.length}
+      minute={minute}
+      receivedAt={receivedAt}
+      onLegsChange={setLegs}
     />
   );
 }

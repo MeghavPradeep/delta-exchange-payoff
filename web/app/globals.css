@@ -1907,3 +1907,45 @@ th.picks-head { text-align: center; }
 .analyse-main .tabs { padding: 0; }
 .analyse-main .note { margin-left: 0; margin-right: 0; }
 .analyse-side .note { margin-left: 0; margin-right: 0; }
+
+/* P6: the editable strategy, and the chip that says whether this tab is keeping up.
+   The panel reuses `.legs-panel` and `.leg-row` from the chain screen — one recipe for
+   "a bordered panel of legs" rather than a second one invented here — and adds only the
+   three fields and the remove button, which the read-only panel has no use for. */
+.analyse-legs { padding: var(--pad) var(--pad) 0; }
+
+.leg-editor .legs-list { gap: 6px; }
+
+.leg-edit-row { flex-wrap: wrap; }
+
+.leg-input {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  padding: 4px 6px;
+}
+.leg-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.leg-contract { flex: 1 1 260px; min-width: 220px; }
+.leg-qty { width: 64px; text-align: right; }
+.leg-price { width: 110px; text-align: right; }
+
+.leg-remove {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.leg-remove:hover { color: var(--put); border-color: var(--put); }
+
+.leg-editor-note { margin: 0; font-size: 11px; color: var(--ink-faint); }
+
+/* A live tab is the only one that is moving, so it is the only chip that is tinted.
+   A stored minute gets the plain `.chip`: nothing about it is happening. */
+.chip.live { color: var(--up); border-color: color-mix(in srgb, var(--up) 45%, transparent); }
