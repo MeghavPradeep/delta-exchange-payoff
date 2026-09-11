@@ -4,10 +4,12 @@ import { useState } from "react";
 
 import {
   type Commit,
+  appendLeg,
   commitEntryPrice,
   commitInstrument,
   commitQuantity,
   removeLeg,
+  toggleDirection,
   withQuantity,
 } from "@/lib/leg-edit";
 import type { LegRequest } from "@/lib/payoff";
@@ -50,10 +52,10 @@ import type { LegRequest } from "@/lib/payoff";
  * would each be sent and two of them are fills nobody got. A quantity has no meaningful
  * half-typed state: every prefix of an integer is an integer.
  *
- * **`direction` is not editable here.** The ticket names three fields and this is the
- * fourth; B and S are separate positions rather than one signed quantity, and a toggle
- * that turned a bought leg into a sold one at the same entry price would quietly claim a
- * fill on the other side of the spread.
+ * **`direction` is a toggle, and flipping it drops the entry price.** B and S are
+ * separate positions rather than one signed quantity, so a flip that kept the price would
+ * quietly claim a fill on the other side of the spread; without one the engine re-prices
+ * the leg off the book.
  *
  * **The address bar is debounced and the request is not, deliberately.** Typing `1234`
  * into the quantity box commits four times and issues four `POST /analyse`. The 200 ms
@@ -98,9 +100,15 @@ export default function LegEditor({
             key={`${leg.instrument}:${leg.direction}:${index}:${reseeds}`}
             className="leg-row leg-edit-row"
           >
-            <span className={`leg-direction ${leg.direction === 1 ? "b" : "s"}`}>
+            <button
+              type="button"
+              className={`leg-direction ${leg.direction === 1 ? "b" : "s"}`}
+              aria-label={leg.direction === 1 ? "Bought — click to sell" : "Sold — click to buy"}
+              title="Switch this leg between bought and sold. Any entry price is dropped: it was a fill on the other side of the spread."
+              onClick={() => onLegsChange(toggleDirection(legs, index))}
+            >
               {leg.direction === 1 ? "B" : "S"}
-            </span>
+            </button>
 
             <input
               className="leg-input leg-contract"
@@ -158,6 +166,16 @@ export default function LegEditor({
           </li>
         ))}
       </ul>
+
+      <button
+        type="button"
+        className="leg-add"
+        disabled={legs.length === 0}
+        title="Copy the last leg at one lot, then edit its contract."
+        onClick={() => onLegsChange(appendLeg(legs))}
+      >
+        + Add leg
+      </button>
 
       <p className="leg-editor-note">
         An empty price is filled from the book by crossing the spread. Everything you

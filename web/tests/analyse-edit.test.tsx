@@ -25,6 +25,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import AnalyseView from "@/components/AnalyseView";
 import {
+  appendLeg,
+  toggleDirection,
   commitEntryPrice,
   commitInstrument,
   commitQuantity,
@@ -337,6 +339,26 @@ check("REMOVING THE LAST LEG: a readable empty state, not a crash and not a stal
   assert.match(html, /no legs/i);
   assert.doesNotMatch(html, /<polyline/, "nothing left to draw");
   assert.doesNotMatch(html, /aria-label="Quantity"/, "and nothing left to edit");
+});
+
+check("THE DIRECTION TOGGLE: B becomes S, and the price of the old side does not follow", () => {
+  const priced = withEntryPrice(one(), 0, "900");
+  const flipped = toggleDirection(priced, 0);
+  assert.equal(flipped[0]!.direction, -1);
+  assert.equal(flipped[0]!.entry_price, undefined, "that fill was on the other side of the spread");
+  assert.equal(toggleDirection(flipped, 0)[0]!.direction, 1, "and back again");
+  const legs = one();
+  assert.equal(toggleDirection(legs, 7), legs, "no such leg, and the same array back");
+});
+
+check("ADDING A LEG: the last one copied at a single lot, with no price", () => {
+  const added = appendLeg(withEntryPrice(one(), 0, "900"));
+  assert.equal(added.length, 2);
+  assert.equal(added[1]!.instrument, added[0]!.instrument);
+  assert.equal(added[1]!.quantity, 1);
+  assert.equal(added[1]!.entry_price, undefined);
+  const empty: LegRequest[] = [];
+  assert.equal(appendLeg(empty), empty, "nothing to copy, and the same array back");
 });
 
 if (failures > 0) {
