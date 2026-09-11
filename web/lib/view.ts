@@ -57,14 +57,24 @@ export const NO_VIEW: ViewRequest = {
  */
 export function parseView(raw: Record<string, string | string[] | undefined>): ViewRequest {
   return {
-    tab: parseTab(one(raw.tab)),
-    underlying: parseUnderlying(one(raw.underlying)),
-    expiry: parseExpiry(one(raw.expiry)),
-    minute: parseMinute(one(raw.minute)),
+    tab: parseTab(firstParam(raw.tab)),
+    underlying: parseUnderlying(firstParam(raw.underlying)),
+    expiry: parseExpiry(firstParam(raw.expiry)),
+    minute: parseMinute(firstParam(raw.minute)),
   };
 }
 
-function one(value: string | string[] | undefined): string | null {
+/**
+ * The first value of a query parameter, or `null`.
+ *
+ * **Exported, and the only copy.** Next hands a repeated parameter down as an array, and
+ * every route that reads the URL has to make the same choice about it. This was private
+ * here and hand-copied into `app/page.tsx` and `app/analyse/page.tsx` as `firstParam` —
+ * three implementations of one rule, which is exactly how two routes come to disagree
+ * about what `?legs=a&legs=b` means. It belongs in this file for the reason `parseView`
+ * and `viewQuery` do: the URL layer is one subject.
+ */
+export function firstParam(value: string | string[] | undefined): string | null {
   if (Array.isArray(value)) return value[0] ?? null;
   return value ?? null;
 }
