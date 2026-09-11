@@ -1,5 +1,7 @@
 "use client";
 
+import { useRef, useState } from "react";
+
 import { formatStrike } from "@/lib/format";
 import { parseCanonical } from "@/lib/instrument";
 import type { LegRequest } from "@/lib/payoff";
@@ -26,9 +28,44 @@ import type { LegRequest } from "@/lib/payoff";
  * not mount this component otherwise, so there is no empty state to design here.
  */
 export default function LegsPanel({ legs, href }: { legs: LegRequest[]; href: string }) {
+  /** Where the reader dragged it to, in viewport pixels; `null` until they do, which is
+   *  the bottom-right corner CSS gives it. */
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const grab = useRef({ x: 0, y: 0 });
+
+  /* Dragged by its title bar, with pointer capture so a fast drag that leaves the bar
+     still belongs to it — the one thing a plain mousemove listener gets wrong. Clamped
+     to the viewport: a popup dropped off the edge cannot be dragged back. */
+  const onPointerDown = (event: React.PointerEvent<HTMLHeadingElement>) => {
+    const box = event.currentTarget.parentElement!.getBoundingClientRect();
+    grab.current = { x: event.clientX - box.left, y: event.clientY - box.top };
+    setAt({ x: box.left, y: box.top });
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const onPointerMove = (event: React.PointerEvent<HTMLHeadingElement>) => {
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    const box = event.currentTarget.parentElement!.getBoundingClientRect();
+    const clamp = (value: number, size: number, limit: number) =>
+      Math.max(0, Math.min(value, limit - size));
+    setAt({
+      x: clamp(event.clientX - grab.current.x, box.width, window.innerWidth),
+      y: clamp(event.clientY - grab.current.y, box.height, window.innerHeight),
+    });
+  };
+
   return (
-    <section className="legs-panel" aria-label="Strategy">
-      <h2 className="legs-panel-title">
+    <section
+      className={`legs-panel legs-popup${at === null ? "" : " moved"}`}
+      aria-label="Strategy"
+      style={at === null ? undefined : { "--x": `${at.x}px`, "--y": `${at.y}px` } as React.CSSProperties}
+    >
+      <h2
+        className="legs-panel-title"
+        title="Drag to move"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+      >
         Legs — {legs.length} {legs.length === 1 ? "leg" : "legs"}
       </h2>
 

@@ -162,3 +162,22 @@ export function removeLeg(legs: LegRequest[], index: number): LegRequest[] {
   if (legs[index] === undefined) return legs;
   return [...legs.slice(0, index), ...legs.slice(index + 1)];
 }
+
+/** The same contract, traded the other way. B and S are separate positions, so the
+ *  entry price does not survive the flip: it was a fill on the other side of the spread,
+ *  and keeping it would claim a price nobody was given. Dropped, so the engine re-prices
+ *  the leg off the book. */
+export function toggleDirection(legs: LegRequest[], index: number): LegRequest[] {
+  return replace(legs, index, (leg) => {
+    const { entry_price: _dropped, ...rest } = leg;
+    return { ...rest, direction: leg.direction === 1 ? -1 : 1 };
+  });
+}
+
+/** One more leg, copied off the last one at a single lot and no price — a starting point
+ *  to edit, since a blank contract string is not a contract. */
+export function appendLeg(legs: LegRequest[]): LegRequest[] {
+  const last = legs[legs.length - 1];
+  if (last === undefined) return legs;
+  return [...legs, { instrument: last.instrument, direction: last.direction, quantity: 1 }];
+}

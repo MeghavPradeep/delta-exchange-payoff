@@ -271,7 +271,8 @@ check("the line is drawn through all four corners, at the coordinates worked by 
   const html = renderToStaticMarkup(
     <PayoffChart curve={STRANGLE} forward={77609.4} breakevens={[72600, 81400]} factor={1} unit="USD" />,
   );
-  const points = /points="([^"]+)"/.exec(html);
+  // The gradient fill is a `<polygon>` drawn first; the line itself is the polyline.
+  const points = /<polyline[^>]*points="([^"]+)"/.exec(html);
   assert.ok(points, "a polyline is drawn");
   /*
    * The exact coordinates, not a count of them — a count leaves the component's own

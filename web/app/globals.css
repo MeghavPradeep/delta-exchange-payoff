@@ -1639,6 +1639,11 @@ td.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -
   width: 320px;
   position: sticky;
   top: 0;
+  /* The panel grows with the strategy and with the contract card under it; without a
+     ceiling a sticky column simply runs off the bottom of the viewport and the end of it
+     cannot be reached. It scrolls in itself instead. */
+  max-height: 100vh;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--pad);
@@ -1650,6 +1655,28 @@ td.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -
   background: var(--surface);
   padding: 10px var(--pad) var(--pad);
 }
+
+/* P: the strategy is a popup, not a column. It used to sit at the top of a sticky
+   column, where a ladder scrolled past it left the list clipped against the header and
+   unreadable. Floating, it starts in the bottom-right corner and can be dragged anywhere
+   by its title bar; `--x`/`--y` are set by the drag and are unset until then, which is
+   what keeps the default corner in CSS rather than in a measurement at mount. */
+.legs-popup {
+  position: fixed;
+  left: var(--x, auto);
+  top: var(--y, auto);
+  right: var(--pad);
+  bottom: var(--pad);
+  z-index: 30;
+  width: 300px;
+  max-height: 60vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+}
+/* Once dragged the corner offsets must not fight the coordinates. */
+.legs-popup.moved { right: auto; bottom: auto; }
+.legs-popup .legs-panel-title { cursor: grab; user-select: none; }
+.legs-popup .legs-panel-title:active { cursor: grabbing; }
 
 .legs-panel-title {
   margin: 0 0 8px;
@@ -1943,6 +1970,28 @@ th.picks-head { text-align: center; }
   cursor: pointer;
 }
 .leg-remove:hover { color: var(--put); border-color: var(--put); }
+
+
+/* The direction is a control here, not a label — same box, so the row does not move. */
+button.leg-direction { border: 1px solid transparent; cursor: pointer; font-family: inherit; }
+button.leg-direction:hover { border-color: currentColor; }
+
+.leg-add {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 8px;
+  padding: 5px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink-soft);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.leg-add:hover:not(:disabled) { color: var(--ink); border-color: var(--accent); }
+.leg-add:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .leg-editor-note { margin: 0; font-size: 11px; color: var(--ink-faint); }
 

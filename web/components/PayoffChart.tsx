@@ -111,6 +111,13 @@ export default function PayoffChart({
   }, []);
 
   const zero = projectY(0, ySpan, PLOT_HEIGHT);
+  /* Where zero sits as a fraction of the frame, clamped — unlike `zero` this is defined
+     even when the whole curve is on one side of it, which is exactly when the fill has to
+     be all green or all red rather than absent. */
+  const zeroFraction = (ySpan.max - 0) / (ySpan.max - ySpan.min);
+  const zeroAt = Number.isFinite(zeroFraction) ? Math.min(1, Math.max(0, zeroFraction)) : 0.5;
+  const line = polyline(points, span, ySpan, PLOT_WIDTH, PLOT_HEIGHT);
+  const area = closeToZero(line, Number((zeroAt * PLOT_HEIGHT).toFixed(2)));
   const forwardX = forward === null ? null : projectX(forward, span, PLOT_WIDTH);
 
   return (
@@ -141,6 +148,18 @@ export default function PayoffChart({
         aria-label={`Profit and loss at expiry between ${formatStrike(span.min)} and ${formatStrike(span.max)}`}
         ref={frame}
       >
+        {/* Profit green, loss red, both fading out away from zero. One gradient with a
+            hard stop where zero falls, so the area closed back to the zero line is tinted
+            by which side of it each part is on. */}
+        <defs>
+          <linearGradient id="payoff-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="var(--up)" stopOpacity="0.35" />
+            <stop offset={zeroAt} stopColor="var(--up)" stopOpacity="0.02" />
+            <stop offset={zeroAt} stopColor="var(--down)" stopOpacity="0.02" />
+            <stop offset="1" stopColor="var(--down)" stopOpacity="0.35" />
+          </linearGradient>
+        </defs>
+
         <g transform={`translate(${PLOT_LEFT},${PLOT_TOP})`}>
           {/* The P&L axis. Its labels carry the multiplier; the price axis never does. */}
           {linearTicks(ySpan.min, ySpan.max, 5).map((tick) => {
@@ -177,9 +196,11 @@ export default function PayoffChart({
             <line className="payoff-zero" x1={0} y1={zero} x2={PLOT_WIDTH} y2={zero} />
           )}
 
+          {area === null ? null : <polygon fill="url(#payoff-fill)" points={area} />}
+
           <polyline
             className="payoff-line"
-            points={polyline(points, span, ySpan, PLOT_WIDTH, PLOT_HEIGHT)}
+            points={line}
           />
 
           {breakevens.map((price) => {
@@ -214,6 +235,15 @@ export default function PayoffChart({
       </svg>
     </figure>
   );
+}
+
+/** A polyline's points closed down (or up) to the zero line, so it can be filled.
+ *  `null` when there is no line to close. */
+function closeToZero(line: string, zeroY: number): string | null {
+  const pairs = line.split(" ").filter((pair) => pair !== "");
+  if (pairs.length < 2) return null;
+  const x = (pair: string) => pair.split(",")[0];
+  return `${x(pairs[0]!)},${zeroY} ${line} ${x(pairs[pairs.length - 1]!)},${zeroY}`;
 }
 
 function mid(span: Span): number {
