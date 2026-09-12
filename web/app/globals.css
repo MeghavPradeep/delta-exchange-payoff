@@ -1998,3 +1998,44 @@ button.leg-direction:hover { border-color: currentColor; }
 /* A live tab is the only one that is moving, so it is the only chip that is tinted.
    A stored minute gets the plain `.chip`: nothing about it is happening. */
 .chip.live { color: var(--up); border-color: color-mix(in srgb, var(--up) 45%, transparent); }
+
+/* ------------------------------------------------- the exposure screens (GEX, OI)
+ *
+ * Two screens, one stylesheet block, because they are one layout: a heading with the
+ * board's own qualification beside it, and the shared `.plot` under it. Everything else
+ * — header, pickers, chips, `.notice`, `.note` — is the volatility screen's, reused
+ * rather than re-specified.
+ */
+.exposure-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin: var(--pad) 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+/* How much of the board the figures actually cover. Faint, because it qualifies the
+   heading rather than competing with it — but present, because a total drawn from half a
+   board must never be read as a total. */
+.exposure-coverage {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: var(--ink-faint);
+  font-weight: 400;
+}
+
+/* A label on a reference line inside the plot. Small and uppercase like the axis titles,
+   but it takes its colour from the line it names rather than from a token here — the
+   spot mark is amber, the sign change is not, and both are set as props on the `Label`
+   so Recharts does not write its own grey into the markup. */
+.chart-mark {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}

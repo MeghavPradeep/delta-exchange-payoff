@@ -116,6 +116,7 @@ function assertNumeric(chain: ChainResponse): void {
   };
   check("spot", chain.spot);
   check("atm_strike", chain.atm_strike);
+  check("contract_value", chain.contract_value);
   for (const row of chain.rows) {
     check(`rows[${row.strike}].strike`, row.strike);
     for (const [side, leg] of [

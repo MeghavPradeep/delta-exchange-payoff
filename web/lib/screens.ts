@@ -3,15 +3,14 @@
  *
  * One list, so a screen cannot be added to the app and forgotten by the rail. The
  * reference terminal's rail carries seven entries — BKT, PRT, LIB, CHN, STR, VOL, OI —
- * and this list is deliberately not seeded with the five that have no route: a rail
+ * and this list is deliberately not seeded with the ones that have no route: a rail
  * entry that leads nowhere is a promise the app cannot keep. Adding one later is a line
  * in this array and a directory under `app/`, which is what "built to take more" has to
- * mean.
+ * mean — and OI and GEX are that promise kept, added exactly that way.
  *
- * Three-letter codes because that is the terminal's alphabet, and the full name is
- * carried beside the code rather than hidden in a tooltip — CHN and VOL are guessable,
- * the other five are not, and a rail that has to be hovered to be read is a rail that
- * gets read once.
+ * Short codes because that is the terminal's alphabet, and the full name is carried
+ * beside the code rather than hidden in a tooltip — CHN and VOL are guessable, the rest
+ * are not, and a rail that has to be hovered to be read is a rail that gets read once.
  *
  * **The names are the platform's own labels, spelled the platform's way.** The terminal
  * calls the first screen OPTION CHAIN, so this list does too: the same screen named two
@@ -57,6 +56,21 @@ export const SCREENS: readonly Screen[] = [
     href: "/volatility",
     // A pulse: a flat line that moves and settles, which is what the screen shows.
     icon: "M1.5 9 L4.25 9 L6.25 3.75 L9.5 12.25 L11.5 9 L14.5 9",
+  },
+  {
+    code: "GEX",
+    name: "GAMMA EXPOSURE",
+    href: "/gex",
+    // Bars either side of a baseline: the screen is calls above and puts below, and the
+    // axis they are read against is the shape worth drawing at 16px.
+    icon: "M1.5 8 L14.5 8 M4 8 L4 3.5 M7 8 L7 5.5 M10 8 L10 12 M13 8 L13 10",
+  },
+  {
+    code: "OI",
+    name: "OPEN INTEREST",
+    href: "/oi",
+    // A stack of columns of differing height: how much is held, strike by strike.
+    icon: "M2.5 13.5 L2.5 9 M6.5 13.5 L6.5 5 M10.5 13.5 L10.5 7.5 M14.5 13.5 L14.5 2.5",
   },
 ];
 
