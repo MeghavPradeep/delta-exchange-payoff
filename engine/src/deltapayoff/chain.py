@@ -207,6 +207,11 @@ def chain_from_legs(
         fetched_at=stamp.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         rows=rows,
         quote_currency=quote_currency,
+        # Derived here rather than passed in, unlike `quote_currency`. The currency is
+        # keyword-only because a caller could legitimately know a different one; the lot
+        # is this module's own measured record, keyed by the underlying already in hand,
+        # and a parameter would only let a caller contradict it.
+        contract_value=CONTRACT_VALUES.get(underlying.upper()),
     )
 
 

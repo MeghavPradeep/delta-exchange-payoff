@@ -172,6 +172,7 @@ function fixture(): ChainResponse {
     underlying: "BTC",
     expiry: "04-09-2026",
     quote_currency: "USD",
+    contract_value: 0.001,
     spot: 77500,
     atm_strike: 77000,
     fetched_at: "2026-09-04T09:21:00Z",
