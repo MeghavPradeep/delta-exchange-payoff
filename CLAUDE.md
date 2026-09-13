@@ -165,8 +165,8 @@ mirrors it field for field. The websocket sends the identical object `/chain` re
 ## Known drift — verify before trusting
 
 **Historical snapshot, dated 2026-09-04 (before `d163bbc`, #62–#66 and #81) — not re-checked
-against today's `main`.** For the current suite size see [AGENTS.md](AGENTS.md) (**1,606**
-tests with Docker, `measured` 2026-09-12 at `bc3fc43`).
+against today's `main`.** For the current suite size see [AGENTS.md](AGENTS.md) (**1,610**
+tests with Docker, `measured` 2026-09-14 at `7783a4b`).
 
 Four docs had fallen behind the code as of that snapshot:
 
