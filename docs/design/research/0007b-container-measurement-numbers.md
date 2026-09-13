@@ -64,7 +64,7 @@ and the instrument are the second sibling,
 |---|---|---|---|
 | 1x total, six containers | **1.0888 cores** | `derived` | sum of the six `measured` means, I13-clean |
 | 1x total, seven | **1.1351 cores** | `derived` | the above plus `discord-alerts` 0.0463 from short-seven. **Two runs; say so when quoting it** |
-| against the monolith | **3.52x** | `derived` | 1.0888 / R4's `measured` 0.3089 |
+| against the monolith | **3.52x** | `derived` | the total above against R4's `measured` 0.3089 |
 | against R6's split estimate | **-1.0%** | `derived` | 1.0888 against the 1.10-1.75 band's lower bound. **R6's split arithmetic lands on its lower bound** |
 | run intensity | **0.86x** | `derived` | `feed` ingress 724.8 KB/s against R6's 1x 843.4 KB/s. One underlying, and a different day |
 

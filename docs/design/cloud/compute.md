@@ -188,7 +188,7 @@ the unit behind the Redis working set. **Quote it from there, never from a sente
 | `web` / Redis | memory | **110.6 MiB idle / 761.8 MiB** | 240.8 MiB / 1,056.4 MiB | unchanged / 10.269 GiB |
 | `proxy` / `discord-alerts` | — | **0.0109 / 0.0463 core**, 17.1 / 46.9 MiB | no R6 row for either | — |
 
-**The split costs `measured` 1.0888 cores against the monolith's 0.31** — 3.52×, and within 1.0% of R6's lower bound. Start-to-healthy is `measured` **0.250–1.632 s** a service; the rest of `compose up`'s 11–16 s is the healthcheck, not the service.
+**The split costs `derived` 1.0888 cores against the monolith's 0.31** — 3.52×, and within 1.0% of R6's lower bound. Start-to-healthy is `measured` **0.250–1.632 s** a service; the rest of `compose up`'s 11–16 s is the healthcheck, not the service.
 
 ## 9. One instance or several
 

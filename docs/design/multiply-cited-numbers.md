@@ -10,9 +10,10 @@ The check itself lives in
 `_multiply_cited_tag_disagreements`, and runs on every test collection —
 `test_the_multiply_cited_figure_sweep_finds_no_new_disagreement`. A second test,
 `test_no_allowlist_entry_has_gone_stale`, checks the allowlist itself. This file is that sweep's
-output, `measured` 2026-09-12 at #112's `HEAD`, kept as the readable record instead of only the
-report. **Quote a number's disagreement from here or from the test's docstrings; the full
-per-number reasoning lives in the test's `_KNOWN_MULTIPLY_CITED` and is not restated.**
+output, `measured` 2026-09-12 at #112's `HEAD` and updated by #118 on 2026-09-13, kept as the
+readable record instead of only the report. **Quote a number's disagreement from here or from the
+test's docstrings; the full per-number reasoning lives in the test's `_KNOWN_MULTIPLY_CITED` and
+is not restated.**
 
 ## 1. Method, in short
 
@@ -40,8 +41,13 @@ not.
 |---|---|---|---|
 | 1,849.8 events/s | #105 | `message-bus-numbers.md`, `redis-hosting.md` (×2), `decisions/0010-store-replay.md`, `lld/redis-bus.md`, `lld/store-replay.md`, `research/0001`, `research/0005`, `research/0005b`, `research/0007-load-profile.md` (×2) | **`derived` everywhere.** `redis-hosting.md:111`, `decisions/0010-store-replay.md:97` and `lld/store-replay.md:191` corrected; the last also named the wrong run and is corrected to #58's arithmetic |
 | 5,511 ms | #112 | `docs/storage.md:135`, `docs/design/research/0010-store-replay.md:119`, `docs/design/lld/store-numbers.md:12` | **`derived` everywhere.** `storage.md` already had it right (5,001 ms + `ob_l2`'s measured 510.3 ms). `research/0010-store-replay.md:119` called it a `measured` max arrival lag — corrected. `lld/store-numbers.md:12` attributed the ceiling to the measuring tool directly — corrected to name it as `storage.md`'s arithmetic |
+| 1.0888 cores | #118 | `research/0007b-container-measurement-numbers.md:65`, `research/0007a-container-measurement.md:132`, `compute.md:191`, `decisions/0005-compute-and-region.md:191`, `decisions/0008-topology.md:156` | **`derived` everywhere.** `0007b`'s ledger was right — a sum of six `measured` means is computed, not observed. The other four called the total `measured`; all four corrected. 0008 and 0005 also carry an appended note, since a tag correction inside a decision record's own sentence is still a correction |
+| 1,056.4 MiB | #118 | `decisions/0007-load-profile.md:37`, `research/0007-load-profile.md:75` | **`measured` everywhere**, and the research cell reshaped so the sweep can read it — see §7 |
 
-Full evidence: `test_1849_8_events_per_second_is_derived_everywhere` and the #112 issue thread.
+Full evidence: `test_1849_8_events_per_second_is_derived_everywhere` (1,849.8),
+`test_1056_4_mib_cell_is_readable_by_the_sweep` (1,056.4, cell shape), and the #112 and #118
+issue threads. 1.0888 has no dedicated pin: once every site agreed, the general sweep in §1
+covers it the same as any other figure, which is the point of building a sweep instead of a pin.
 
 ## 3. Settled by discovering the disagreement no longer exists
 
@@ -57,15 +63,18 @@ sweep no longer flags either figure. `git log -S"1.45" -- docs/design/lld/store.
 the first dead entry; `git log 9f0084f..26e24dd -- docs/design/cloud/compute.md` names #79 for
 this one.
 
-## 4. Found, not fixed here — `out_of_scope_noticed`
+**The lesson is general, not particular to `240.8`: an allowlist entry can die of a fix it never
+knew about.** Nobody editing `compute.md` for #79 was thinking about #105's allowlist, and nothing
+obliged them to be — the entry died as a side effect of an unrelated, correct change. That is
+exactly why `test_no_allowlist_entry_has_gone_stale` (§6) checks every entry on every run rather
+than trusting whoever last touched a cited site to remember an allowlist exists.
 
-| Figure | Sites | Disagreement |
-|---|---|---|
-| 1.0888 cores | `research/0007b-container-measurement-numbers.md:65`, `research/0007a-container-measurement.md:132`, `compute.md:191`, `decisions/0005-compute-and-region.md:191`, `decisions/0008-topology.md:156` | Found widening the sweep for #112; not named in that ticket. `0007b`'s ledger tags it `derived` — "sum of the six `measured` means" — and is arithmetically right: a sum of measured inputs is computed, not observed. Every other site calls the same total `measured`. Real, and not this ticket's to fix: correcting it touches two decision records outside #112's territory |
-| 1,056.4 MiB | `decisions/0007-load-profile.md:37` (`measured`), `research/0007-load-profile.md:75` (`derived`, its own §4 table) | Found by the #79 agent *after* #112 was filed, appended to `decisions/0007-load-profile.md` rather than corrected in place: "the research file's `derived` is the one the arithmetic supports... it is not this ticket's to settle." §7 below explains why the sweep — widened or not — still cannot see this one |
+## 4. Found in #112, fixed in #118
 
-Both are allowlisted (1.0888 in `_KNOWN_MULTIPLY_CITED`; 1,056.4 cannot be, since the sweep does
-not flag it — see §7) so the tripwire does not fail on them while they wait for an owner.
+`1.0888` and `1,056.4` (§2) sat here as `out_of_scope_noticed` from #112 through #117: one a real,
+readable disagreement outside that ticket's territory, the other invisible to the sweep entirely.
+#118 fixed both; see §2 for the sites and §7 for why `1,056.4` needed a shape change, not just a
+tag change. Nothing is open here as of #118.
 
 ## 5. Candidates that are not real disagreements
 
@@ -104,7 +113,8 @@ after #105 wrote the entry down, and nothing noticed: the old sweep only ever as
 out, on the now-resolved `240.8`) before the fix, green after. The entry above is re-cited
 against sites that still exist.
 
-## 7. Why #95's tripwire did not catch 1,849.8, and why #112's still cannot see everything
+## 7. Why #95's tripwire did not catch 1,849.8, why #112 still could not see everything, and how
+   #118 closed the `1,056.4` gap
 
 `test_cloud_numbers.py` before #105 held two pins, both written by hand after #95 found a
 specific defect. Neither asked the general question. §1's sweep is the general form.
@@ -115,15 +125,61 @@ and several of those are the heuristic attaching a neighbour's tag to the wrong 
 failure mode §5 catalogues. `_column_tag` is scoped instead: only the two immediate cells, and
 only when a neighbour is *exactly* one tag.
 
-**That scope is also why `1,056.4 MiB`'s decisions-vs-research disagreement (§4) stays invisible.**
-`decisions/0007-load-profile.md:37` tags it `measured` within its own cell, found normally. But
-`research/0007-load-profile.md:74`'s cell reads `**1,056.4 MiB** at 30 min, 2 GiB ceiling
-\`derived\` M4` — the tag is 32 characters from the number, past prose describing a *different*
-fact (the 2 GiB ceiling) in the same cell. It is neither a same-cell match (too far) nor a
-column match (there is no neighbouring cell; it is one dense prose cell). Every other citing file
-either omits the tag entirely or repeats `measured`, so the sweep's aggregate tag set for
-`1,056.4` never gains a second value and the token never appears as a disagreement — confirmed by
-running `_multiply_cited_tag_disagreements()` against the corrected tree. **The widened sweep
-does not find it either.** Closing this gap generally would mean parsing which fact inside a
-multi-fact cell a trailing tag belongs to, not proximity or position — a different, larger change
-than #112's, and not attempted here.
+**That scope is why `1,056.4 MiB`'s decisions-vs-research disagreement stayed invisible through
+#112.** `decisions/0007-load-profile.md:37` tagged it `measured` within its own cell, found
+normally. But `research/0007-load-profile.md:75`'s cell read `**1,056.4 MiB** at 30 min, 2 GiB
+ceiling \`derived\` M4` — the tag sat 32 characters from the number, past prose describing a
+*different* fact (the 2 GiB ceiling) in the same cell. It was neither a same-cell match (too far)
+nor a column match (no neighbouring cell; one dense prose cell), so the sweep's aggregate tag set
+for `1,056.4` never gained a second value and the token never appeared as a disagreement.
+
+**#118's decision: forbid the shape, don't parse it.** Two ways to close this were open. (a)
+Teach the sweep which fact inside a multi-fact cell a trailing tag belongs to — real clause
+parsing, not proximity or position, and a materially larger change than `_column_tag`. It would
+also solve nothing for a *reader*: a cell that states two facts under one tag is exactly as
+ambiguous to a person as to a parser, so a correct parser papers over a writing problem instead of
+fixing it. (b) Forbid a cell from stating two facts behind one shared trailing tag — each fact
+gets its own adjacent tag, or the second stays untagged if it needs no citation of its own — and
+fix the one offending cell now.
+
+**#118 chose (b).** It is cheaper today — a documentation edit, not a new parsing pass over
+`_column_tag`'s two-neighbour scope — but it is not a one-time fix the way a parser would be: the
+next dense cell written this way needs its own edit, so the cost is paid again, in more files,
+each time the shape recurs, rather than once in the sweep's code. That trade was made deliberately:
+a rule a person can apply while writing ("one tag per fact, next to the fact") is worth more here
+than a parser that would still leave the source ambiguous to read. `research/0007-load-profile.md`
+§4's Redis memory cell now reads `**1,056.4 MiB** \`measured\` M4 at 30 min; 2 GiB ceiling` — the
+measured figure carries its own tag; the ceiling, sourced to 0002 elsewhere, needs none here.
+`test_1056_4_mib_cell_is_readable_by_the_sweep` pins the result at the mechanism: it calls
+`_nearest_tag`/`_column_tag` on the real cell and asserts a tag comes back, red against the
+original cell and green after the split. The general sweep in §1 confirms the figure now agrees
+everywhere (§2) — a consequence of fixing the tag, not of the shape fix by itself.
+
+## 8. What this check still cannot see
+
+Naming a blind spot is worth more than believing there are none. Besides multi-fact cells
+(§7, now forbidden rather than parsed), the sweep as it stands cannot see:
+
+- **A number and its tag split across lines.** `_nearest_tag`/`_column_tag` both operate on one
+  line (one table row, or one line of prose) at a time. Hand-wrapped prose that puts a number on
+  one line and its tag on the next — exactly what this file's own §7 did in an earlier revision,
+  describing `1,056.4`'s cell across a line break — is invisible the same way a too-far same-cell
+  tag is, and for the same underlying reason: the sweep never looks past one line.
+- **A tag not spelled as a bare backtick-quoted word.** `_TAG_RE` matches only `` `measured` ``,
+  `` `derived` ``, `` `assumed` `` or `` `unmeasured` ``, in backticks, unqualified. "measured
+  0.5% high" in running prose, or a tag inside a longer backtick-quoted phrase, matches nothing.
+- **A figure cited only once, or consistently wrong everywhere.** The check is a *disagreement*
+  detector: it needs two or more files with a readable tag before it can compare them. A number
+  wrong in its one citation, or wrong the same way in every citation, produces no disagreement to
+  find — this class needs a different check, not a wider one.
+- **A tag more than one column away.** `_column_tag` reads only the two immediate neighbours.
+  This repository's numbers-table shape has never needed a third column between a figure and its
+  tag, but nothing enforces that; a future table that does would defeat it silently.
+- **Two candidate tags in the same cell.** `_column_tag` deliberately returns nothing when both
+  neighbours are pure tags and disagree (`_PURE_TAG_RE`'s `len(candidates) == 1` check) — the
+  right call against false positives, but it means a genuine disagreement expressed exactly this
+  way would also go unflagged.
+- **A coincidental match on unrelated quantities.** `_specific` (§1) cuts most round-number
+  collisions, but two independently precise figures that happen to share four significant digits
+  would still merge into one token, in either direction: a real disagreement could hide behind an
+  apparent one, or vice versa. §5's `1,000` entry is the mild form of this that surfaced by luck.

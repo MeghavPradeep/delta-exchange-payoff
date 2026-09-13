@@ -153,7 +153,7 @@ figure — so the two documents now say the same thing.
 
 **R7's re-cost threshold reads: "I13 (#79) measuring the 1× total at 1.4 cores or less brings
 back `m7g.large` at $48.94. Past 2.8 cores, the threshold above applies." The 1× total is
-`measured` 1.0888 cores** across the six containers of the I13 collection, or `derived`
+`derived` 1.0888 cores** across the six containers of the I13 collection, or `derived`
 **1.1351** with `discord-alerts` added from its own later run — two runs in one sum, and a
 quotation of it has to say so. **The lower threshold is crossed and the 2.8-core split
 threshold is not approached**, at `derived` 41% of it.
@@ -175,3 +175,20 @@ serialises on `depends_on` and the healthcheck — `interval` 3 s and `start_per
 of seven — adds a further 4.4–9.3 s of detection lag. **A rolling deploy here waits on
 healthcheck configuration, not on service boot**, and that is the lever if the wait ever
 matters.
+
+## #118 correction — the 1.0888 tag, re-read against both thresholds
+
+**Appended, not rewritten.** The determination above tagged the 1× total as if it had been
+observed. That was wrong and is corrected in place, per this repository's rule that a tag
+mistake is never accurate at any date, unlike a superseded finding: 1.0888 is the sum of six
+`measured` per-container means, computed rather than observed, so the total itself is `derived`
+— the tag `research/0007b-container-measurement-numbers.md:65` already carried. Four other
+sites (`0007a-container-measurement.md`, `cloud/compute.md`, and this record and 0005, both
+here) called the same total by the wrong word; all four now agree with 0007b. Filed as #118.
+
+**The value is unchanged, so neither threshold this record names moves.** Re-reading both:
+the split-into-T4 trigger is **2.8 cores**, and 1.0888 (or 1.1351 with `discord-alerts`) sits at
+39–41% of it — nowhere near, exactly as before the tag correction. The `m7g.large`-returns
+trigger, "the 1× total at 1.4 cores or less," is also unaffected: 1.0888 is below 1.4 whether
+the tag reads `measured` or `derived`. Per #95's rule — say which threshold a corrected number
+crosses and stop — **none does; there is nothing to stop for.**
