@@ -137,8 +137,8 @@ stayed 0 on all four streams through #108, because there was nothing arriving to
 
 ## 7. The suite
 
-**1,541 tests pass, 0 fail, `ruff check .` clean**, `measured` 2026-09-12 on `main`. It was
-1,401 that morning.
+**1,606 tests pass, 0 fail, `ruff check .` clean**, `measured` 2026-09-12 on `main` at
+`bc3fc43`. It was 1,401 that morning.
 
 **Ten tests that proved nothing were found and fixed this week.** The shape is a test that would
 still pass with the implementation reverted. The two methods that find them are in

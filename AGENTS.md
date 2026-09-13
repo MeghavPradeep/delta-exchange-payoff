@@ -57,10 +57,10 @@ node node_modules/next/dist/bin/next build
 `next build` rewrites `web/next-env.d.ts`. Leave it dirty and say so in your report; the
 orchestrator restores it. Do not run git yourself.
 
-The suite is **1,401** tests with Docker available (`measured` 2026-09-12, after the audit
-fixes #82 to #91). Without Docker the Redis-backed parametrisations skip rather than run: the
+The suite is **1,606** tests with Docker available (`measured` 2026-09-12 on `main` at
+`bc3fc43`, after #107–#117). Without Docker the Redis-backed parametrisations skip rather than run: the
 collected count is the same, the passed count is lower. A run that collects far fewer than
-1,401 has failed to collect, whatever it printed — and see the `--basetemp` note above before
+1,606 has failed to collect, whatever it printed — and see the `--basetemp` note above before
 you conclude your change broke something.
 
 ## Hard rules
@@ -127,10 +127,10 @@ you conclude your change broke something.
   already went to a sibling, `0001-units-reconciliation.md`; the record keeps a one-line
   pointer. Split it properly the next time it is touched — it is the tightest file here.
 
-  `docs/design/lld/logging.md` is no longer over: #63 split it, 213 becomes **92** plus a
-  75-line `logging-catalogue.md`, and generalised the parser from one file to a tuple.
+  `docs/design/lld/logging.md` is no longer over: #63 split it, 213 becomes 92 plus a
+  75-line `logging-catalogue.md` (**99** and **101** on 2026-09-14), and generalised the parser to a tuple.
   `docs/design/hld.md` is **197**; it was 219 before #62 moved its evidence into
-  `hld-evidence.md`. `docs/design/lld/store.md` is **191**; it was 204 before #81 moved its
+  `hld-evidence.md`. `docs/design/lld/store.md` is **199**; it was 204 before #81 moved its
   evidence into `store-numbers.md`, then lost a paragraph #87 found stale. Three times now,
   a design note filling up has been fixed the same way — the design stays and the evidence
   moves to a sibling — as `hld-evidence.md` (#62), `logging-catalogue.md` (#63) and
