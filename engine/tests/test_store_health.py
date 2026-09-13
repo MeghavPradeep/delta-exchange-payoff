@@ -492,6 +492,11 @@ def test_a_dead_reader_hands_the_seal_clock_the_position_it_stopped_at(
                 what="the reader reported itself caught up",
             )
             caught_up = process.subscription.behind_streams()
+            # The writer drains what the reader delivered, as `run` does. #119's seal
+            # clock never runs ahead of what the writer has drained, so without this
+            # it would pin at the epoch -- correct, and not the rule this test pins.
+            while not process.subscription.queue.empty():
+                process.writer.ingest(process.subscription.queue.get_nowait())
             # **Redis stamps entries with its own clock, so the fixture takes its time
             # from the entry rather than the other way round** -- the same reason
             # `test_bus_contract.py`'s trim tests move their clock forward from what

@@ -1516,6 +1516,9 @@ class BarWriter:
             getattr(subscription, "positions", {})
         )
         self.origins: dict[int, dict[str, Position]] = {}
+        #: Streams this writer has drained through a short `>` read of since it started.
+        #: Once in, never out -- see `catching_up_streams`. #119.
+        self._caught_up: set[str] = set()
         self.pause_spans: list[Span] = []
         self.replay_gap_entries = 0
         self.control_ignored = 0
@@ -1582,13 +1585,44 @@ class BarWriter:
         self.prev_positions = dict(checkpoint.streams)
 
     def seal_clock(self) -> float:
-        """Use the log's newest seen timestamp while a lossless reader is behind."""
+        """The clock a split store seals on: the log's, until the log is caught up.
+
+        **The invariant (#119).** `seal_now <= min(wall clock, idtime(P_s) for every
+        stream s still behind, idtime(D_s) for every stream s still catching up)`, where
+        `P_s` is the reader's position (record 0010 R4), `D_s` is this writer's
+        **drained** position -- where `run` had emptied the queue to on its last pass --
+        and `idtime` is the millisecond inside a stream id.
+
+        **The frontier of a stream that is fully caught up is the wall clock.** A stream
+        is caught up once `D_s.index >= C_s.index`, where `C_s` is
+        `RedisSubscription.caught_up_at`: where the reader stood after a group `>` read
+        of s came back short. Redis hands a short read everything it had not delivered,
+        so from then on nothing s held at start-up is undrained, and anything written
+        later carries an id at or after the moment it was written. Release is sticky.
+
+        Before that, the frontier is the log: the time inside the last id drained. A
+        minute open at the previous shutdown can be sealed no earlier than the log
+        itself passes `minute_end + grace`, so the replay and the `>` read re-fold it
+        first -- exactly once, into all four tables. `D_s` at `0-0` pins at the Unix
+        epoch here, on purpose and unlike `behind_streams`: the release needs one `>`
+        read, not a new entry, so a quiet, trimmed or never-written stream still
+        releases within one reader pass. Only a reader that never completes a pass keeps
+        it -- and R4a already stops sealing for that reader, loudly.
+        """
         wall = self.clock()
         if self._subscription is None:
             return wall
+        pinned: list[tuple[str, Position | None]] = [
+            (key, self._subscription.positions.get(key))
+            for key in self._subscription.behind_streams()
+        ]
+        drained = self._drained_positions()
+        pinned += [
+            (key, drained.get(key) or Position("0-0", 0))
+            for key in self.catching_up_streams()
+        ]
         times: list[float] = []
-        for key in self._subscription.behind_streams():
-            position = self._subscription.positions.get(key)
+        for _key, position in pinned:
             if position is None:
                 continue
             try:
@@ -1596,6 +1630,43 @@ class BarWriter:
             except (TypeError, ValueError):
                 continue
         return min([wall, *times]) if times else wall
+
+    def catching_up_streams(self) -> tuple[str, ...]:
+        """Streams this writer has not yet drained through a short `>` read of.
+
+        Empty for a subscription that cannot say -- the monolith's `FanOut`, and every
+        test double without `caught_up_at` -- which leaves those exactly as they were.
+        """
+        subscription = self._subscription
+        reached = getattr(subscription, "caught_up_at", None)
+        if not isinstance(reached, Mapping):
+            return ()
+        positions = self._drained_positions()
+        waiting: list[str] = []
+        for key in getattr(subscription, "streams", ()):
+            if key in self._caught_up:
+                continue
+            at = reached.get(key)
+            drained = positions.get(key)
+            if at is not None and drained is not None and drained.index >= at.index:
+                self._caught_up.add(key)
+                continue
+            waiting.append(key)
+        return tuple(sorted(waiting))
+
+    def _drained_positions(self) -> dict[str, Position]:
+        """Where this writer has decided about everything up to, per stream.
+
+        **The reader's positions when the queue is empty**, because `ingest` is
+        synchronous and the queue has one consumer: an empty queue means every entry the
+        reader delivered has been folded, refused or dropped. Otherwise the positions
+        `run` recorded at its last drained point -- a seal after an awaited command
+        commit can run with the reader further on than the writer.
+        """
+        queue = getattr(self._subscription, "queue", None)
+        if queue is not None and queue.empty():
+            return self.current_positions()
+        return self.prev_positions
 
     def current_positions(self) -> dict[str, Position]:
         if self._subscription is not None:
