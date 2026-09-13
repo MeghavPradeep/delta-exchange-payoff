@@ -123,13 +123,15 @@ The four that carry a decision:
   and resolved the doubt upward. The measurement says it should have resolved downward.
 - **`api` CPU is `measured` 0.3045 and sits inside R6's 0.25-0.49.** The band was right.
 - **Redis memory is `measured` 761.8 MiB against R6's 1,056.4, -27.9%** - one underlying, not
-  two, and the first ten minutes ran under a 1 GiB `maxmemory` before it was raised. R6 tags
-  that reference `measured` in its decision table and `derived` in its research; see R6's own
-  appended note. This file does not re-tag it.
+  two, and the first ten minutes ran under a 1 GiB `maxmemory` before it was raised. R6's own
+  decision table and its research table disagreed on that reference's tag until #118 corrected
+  the research table's cell to `measured` too; see R6's own appended note. This file does not
+  re-tag it.
 - **`api`'s per-viewer network is `measured` 10.4 KB/s for the first viewer and 8.6 KB/s for
   each of the next two, against R6's `derived` 38.9 KB/s a viewer: -73% and -78%.**
 
-**The 1x total is `measured` 1.0888 cores over six containers**, or `derived` 1.1351 with
+**The 1x total is `derived` 1.0888 cores over six containers** (#118: a sum of six `measured`
+means is computed, not observed; corrected from `measured`, see 0008's appended note), or `derived` 1.1351 with
 `discord-alerts`. That is R7's threshold and it is crossed - see
 [../decisions/0008-topology.md](../decisions/0008-topology.md).
 

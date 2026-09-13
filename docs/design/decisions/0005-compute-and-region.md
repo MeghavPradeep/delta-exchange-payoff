@@ -188,8 +188,8 @@ sizing from the route this record's successor had already abandoned — the same
 2026-09-12T05:50:07Z–11:02:38Z, **5h12m and not one day**. **R4's threshold — "if the split
 costs materially more than the monolith's `measured` 30.89% of a core, `m7g.large` is the first
 thing that stops fitting and the 1× row moves to `m7g.xlarge` at $94.24" — answers differently
-in its two halves.** The antecedent is met: the split costs `measured` **1.0888 cores** over six
-containers, `derived` **1.1351** with `discord-alerts` from its own later run, which is `derived`
+in its two halves.** The antecedent is met: the split costs `derived` **1.0888 cores** (#118: a sum
+of six `measured` means) over six containers, `derived` **1.1351** with `discord-alerts` from its own later run, which is `derived`
 **3.52×** the monolith and within 1.0% of the lower bound of R6's `derived` 1.10–1.75 —
 confirming that prediction at its bound. **The consequence does not follow**: 1.0888 cores fits
 `m7g.large`'s 2 vCPU with `derived` 0.91 core spare, so nothing has stopped fitting and **$94.24

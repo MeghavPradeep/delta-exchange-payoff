@@ -43,6 +43,16 @@ itself attaching a row's tag to a different, incidentally-cited number in the sa
 `_KNOWN_MULTIPLY_CITED` below, the same as #105's cell-level false positives. The
 ninth, `1.0888`, is real and open — see its entry.
 
+**#118: two figures the widened sweep left as the honest answer to "does every citation
+agree" -- yes and no.** `1.0888` cores disagreed for real (`derived` in one place,
+`measured` in four); all four are now `derived`, and the stale `1.0888` allowlist entry is
+removed. `1,056.4 MiB` disagreed too, but the sweep could not see it at all: the tag sat
+32 characters from the number in a dense prose cell, past a different fact. #118 does not
+teach the sweep to parse which fact a trailing tag belongs to -- a materially larger
+change that would still leave the cell ambiguous to a human reader, the issue's complaint.
+It instead forbids the shape: a cell with two facts gives each its own adjacent tag. See
+`test_1056_4_mib_cell_is_readable_by_the_sweep` below.
+
 These parse the documents rather than the code, the way `test_events.py`,
 `test_logging.py` and `test_nomenclature.py` already do.
 """
@@ -331,14 +341,13 @@ _KNOWN_MULTIPLY_CITED = {
     "belongs to the row's own 0.86x run intensity, not to the 724.8 KB/s `feed` "
     "ingress figure cited in the Arithmetic cell (`measured` at "
     "research/0007a-container-measurement.md:67)",
-    # Genuine open questions.
-    "1.0888": "OPEN, found widening the sweep for #112, not in that ticket: "
-    "research/0007b-container-measurement-numbers.md:65 tags it `derived` ('sum of "
-    "the six measured means'), while research/0007a-container-measurement.md:132, "
-    "compute.md:191, decisions/0005-compute-and-region.md:191 and "
-    "decisions/0008-topology.md:156 all call the same total `measured`. A real "
-    "disagreement -- fixing it touches two decision records outside this ticket's "
-    "territory, so it is reported, not corrected here; needs its own ticket",
+    # "1.0888" lived here as an OPEN entry from #112 through #117: `derived` in
+    # research/0007b-container-measurement-numbers.md:65, `measured` in the other four
+    # sites. #118 corrected all four to `derived` (a sum of six `measured` means is
+    # computed, not observed), so the sweep no longer finds any disagreement for this
+    # figure -- test_no_allowlist_entry_has_gone_stale would fail naming it if the
+    # entry stayed, the same shape as `1.45` and `240.8` before it (see the doc's
+    # section 6). Removed rather than left to go stale.
 }
 
 
@@ -483,4 +492,70 @@ def test_no_allowlist_entry_has_gone_stale() -> None:
         "written, so the entry is now a claim about the documents that is not true. "
         "Re-verify by hand and either remove the entry or update it to cite where the "
         "disagreement actually lives now: " + ", ".join(stale)
+    )
+
+
+# --- #118: the blind spot #112 named but did not close -----------------------------
+#
+# `research/0007-load-profile.md`'s Redis memory cell packed two facts behind one
+# trailing tag -- "**1,056.4 MiB** at 30 min, 2 GiB ceiling `derived` M4" -- with the
+# tag 32 characters past the number, on the far side of prose about the unrelated 2
+# GiB ceiling. Neither `_nearest_tag` (past `_TAG_PROXIMITY`) nor `_column_tag` (no
+# neighbouring cell; one dense prose cell) could read it, so the figure's
+# decisions-vs-research disagreement never reached `_multiply_cited_tag_disagreements`
+# at all -- not flagged, not allowlisted, invisible by construction.
+#
+# #118 rejected teaching the sweep to parse which fact inside a multi-fact cell a
+# trailing tag belongs to: that is real parsing (clause boundaries, multiple tags per
+# cell disambiguated by what they sit nearest to in *meaning*, not just characters),
+# a materially larger change than #112's column-tag fix, and even a correct parser
+# would leave the cell just as ambiguous to a *human* reader -- the issue's own
+# complaint. Instead the repository now forbids the shape: a cell stating two facts
+# gives each fact its own adjacent tag, or leaves the second one bare, rather than one
+# trailing tag serving both. Cheaper than a parser, and it is the documentation itself
+# that changes when a cell like this turns up, not the sweep's code -- so it costs
+# more files over time as each offending cell is found, not less.
+#
+# This test pins the fix at the mechanism the sweep actually uses, not just the
+# document: it calls `_nearest_tag`/`_column_tag` directly on the real cell, the same
+# way `_multiply_cited_tag_disagreements` does per number. Before #118's doc fix this
+# returned `None` for `1,056.4` in this cell -- run it against the untouched file and
+# it fails naming that. After the cell was reformatted it returns `measured`, the tag
+# `decisions/0007-load-profile.md:37` already carried.
+def test_1056_4_mib_cell_is_readable_by_the_sweep() -> None:
+    """#118 criterion 5: `1,056.4 MiB` must be visible to the sweep afterwards.
+
+    "Visible" here means what it means everywhere else in this file: the sweep's own
+    tag-resolution functions, run on the real cell, return a tag instead of `None`.
+    Whether that tag then agrees with every other citation (it does; see
+    `test_the_multiply_cited_figure_sweep_finds_no_new_disagreement`) is a separate
+    question from whether the cell can be read at all, which is what was broken.
+    """
+    path = REPO / "docs" / "design" / "research" / "0007-load-profile.md"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    candidates = [
+        line
+        for line in lines
+        if "1,056.4" in line and "Redis" in line and line.strip().startswith("|")
+    ]
+    assert len(candidates) == 1, (
+        "expected exactly one Redis-memory table row citing 1,056.4 in "
+        f"research/0007-load-profile.md, found {len(candidates)}: {candidates}"
+    )
+    line = candidates[0]
+    cells = line.split("|")
+    tag = None
+    for cell_index, cell in enumerate(cells):
+        for match in _NUM_STRONG_RE.finditer(cell):
+            if match.group(0) != "1,056.4":
+                continue
+            tag = _nearest_tag(cell, match.start(), match.end())
+            if tag is None:
+                tag = _column_tag(cells, cell_index)
+    assert tag == "measured", (
+        "the sweep cannot read 1,056.4's tag in research/0007-load-profile.md's Redis "
+        f"memory cell (_nearest_tag/_column_tag returned {tag!r}, not 'measured'). "
+        "The cell must give 1,056.4 its own adjacent tag rather than a trailing tag "
+        "shared with a different fact (e.g. the 2 GiB ceiling) further along the cell "
+        "-- see multiply-cited-numbers.md section 7"
     )

@@ -175,3 +175,21 @@ settle.
 `measured` against 843.4 — on one underlying rather than two. Every CPU cell above is
 `measured` at that intensity, and nothing here scales it back to 1x, because the relationship
 between ingress and CPU is exactly what this record estimates.
+
+## #118 determination — `1,056.4 MiB` is `measured` in both places
+
+**Appended, not rewritten.** The paragraph above left this open: "the `Redis | 1,056.4 MiB`
+cell in the decision table above is tagged `measured` while `../research/0007-load-profile.md`
+§4 tags the same figure `derived` M4. They cannot both be right... it is not this ticket's to
+settle." #118 settled it by tracing the number's origin rather than its citation: 1,056.4 MiB
+is 1,107,735,240 B read directly from Redis's `INFO memory` `used_memory` field after I2's
+thirty continuous minutes (0061) — an instrument reading, not arithmetic over other figures —
+so it is `measured`, the tag this record already carried. `1,051.5 MiB`, the #58 forecast this
+run came in 0.5% above, is the `derived` figure nearby; the two were never the same number.
+
+**The research file's `derived` was a mistagged trailing tag, not a second belief.** Its §4 cell
+packed two facts — the measured figure and the 2 GiB `maxmemory` ceiling from 0002 — behind one
+tag 32 characters from the number, past the ceiling prose; the tag belonged to neither fact
+unambiguously and the sweep could not read it either way. §4's cell now gives the measured
+figure its own adjacent tag and leaves the ceiling bare, the way this record's own table already
+did. No value changed, only where the tag sits.

@@ -72,7 +72,7 @@ and **decoded once per consumer**. Both costs are from I2 ([0061-batch-interval.
 | `store` | **0.28–0.51** `derived` C3 | ~115 MiB `derived` M1 | **2.33 KB/s**, 8 files per 300 s `derived` D1 | in 598.2 KB/s, out 2.3 KB/s `derived` N2 | **CPU**, not disk |
 | `api` | **0.25–0.49**, + 0.05–0.14 a watched expiry `derived` C4 | ~80 MiB `derived` M1 | on demand, `assumed` D2 | in 598.2 KB/s; out **38.9 KB/s a viewer** `derived` N3 | **CPU**, set by viewers |
 | `web` | **~0** `derived` C5 | **240.8 MiB** `derived` M3 | none, `assumed`: an image | page loads only, `assumed`: the browser's socket is to `api` | **memory** |
-| Redis | 0.05 `assumed` C6 | **1,056.4 MiB** at 30 min, 2 GiB ceiling `derived` M4 | **none** `derived` D3 | in 598.2, out 1,196.4 KB/s `derived` N4 | **memory** |
+| Redis | 0.05 `assumed` C6 | **1,056.4 MiB** `measured` M4 at 30 min; 2 GiB ceiling | **none** `derived` D3 | in 598.2, out 1,196.4 KB/s `derived` N4 | **memory** |
 
 | Key | Arithmetic, and the measured input |
 |---|---|
