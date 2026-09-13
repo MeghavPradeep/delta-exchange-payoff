@@ -31,8 +31,11 @@ this one adds is ownership, aggregation and a shutdown that actually detaches.
 
 ## 3. Liveness and readiness
 
-The feed's `/health` is `FeedSupervisor.report`: `status` is process liveness and `feed` is
-readiness, the worst local controller state. The API's `/health` keeps the same liveness
+The feed's `/health` is `FeedSupervisor.report` plus a `problems` list: `feed` is readiness, the
+worst local controller state, and **any problem makes `status` `error` and the route 503** — a
+stopped or budget-spent adapter, silence past 135 s, a dead bus reader, flusher or control
+consumer (#108; `feed_main._health_problems`, argued in [reconnect.md](reconnect.md) §8).
+Until #108 `status` was a literal `ok`. The API's `/health` keeps the same liveness
 field, but in split mode its per-adapter state is authoritative from the last observed
 `feed.connection` and `heartbeat` on the filtered `feed-state` subscription. The websocket
 badge reads that same projection. A missing observation remains `null` in its additive age
