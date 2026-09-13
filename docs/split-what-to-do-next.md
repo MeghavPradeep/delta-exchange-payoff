@@ -5,18 +5,15 @@ Open tickets only. Each item names the file or the command. Numbers carry their 
 
 ## Do now, in this order
 
-1. **Land #119 and #118.** #119 holds a restarted `store`'s seal clock at its replay frontier, so
-   the minute open at a restart is folded exactly once into all four tables. It closes **#110**,
-   whose only open criterion it is. #118 settles the two figures that carry two tags.
-2. **Rebuild and restart the stack — #120.** Run `python tools/loadgen.py check`, then
-   `docker compose -p dxp build` and `docker compose -p dxp up -d`, timed to a store flush
-   boundary. That deploys #107, #108, #110, #111, #115 and #119 together. Record `XINFO GROUPS
-   md.option_bar:DELTA:BTC` pending before and after, and read back the first `store.checkpoint`
-   start-up record. **A 503 from `feed` or `discord-alerts` afterwards is intended**, not a regression.
-3. **Close #63 and #79 on the owner's amended criterion.** Both asked for one full day of
-   recording. The owner accepted the evidence already taken on 2026-09-12: 348 minutes with
-   zero interior computed-bar misses (#63), and a 5h12m window holding the busiest hour (#79).
-   #63 waits on #119, because its restart criterion is the minute #110 lost.
+1. **Done 2026-09-14:** #118, #119 and #110 landed and closed; #120's rebuild runs `7783a4b`;
+   #79 closed on the owner's amended criterion (5h12m, not a day). Suite 1,610 with Docker up.
+2. **#121 — a pause loses the open minute from `reference-bars` and `spot-bars`.** Found live on
+   2026-09-13. **#63 stays open on its criterion 5 until #121 lands**; criteria 3 (a hard kill at
+   19:28:30Z lost nothing in any table) and 4 (amended) are met. Establish the mechanism first.
+3. **#122 — the api's minute pass skipped `computed.chain` for 19:04** and records why only in
+   counters `/health` does not expose. Not reproduced. Make each pass write a record before fixing.
+   Also unticketed: after release, a seal following an awaited command commit in `BarWriter.run`
+   can use the wall clock with the queue undrained (#119's note). Unmeasured.
 4. **Get AWS credentials.** #70's criteria 2–4, #71 and #80 cannot start without them. #70's
    closing comment lists exactly what a person with credentials runs, in order.
 5. **Decide the epic.** #57 closes when #70, #71 and #80 do. Nothing else blocks it.
@@ -25,11 +22,9 @@ Open tickets only. Each item names the file or the command. Numbers carry their 
 
 | # | What it is | Why it matters |
 |---|---|---|
-| **#120** | The running images predate six merged fixes | Until rebuilt, #111's pending-list loss resumes the moment the stack starts |
-| **#119** | A seal pass during replay loses the minute open at a restart | A seal is final; `store.empty_generation` only makes it visible |
-| **#110** | Held open on its criterion 2 | That criterion **is** #119 |
-| **#118** | `1.0888` and `1,056.4` each carry two tags | 1.0888 is what record 0008's 2.8-core threshold is read against |
-| **#63**, **#79** | One criterion each asked for a full day | Closing on an amended criterion, above |
+| **#121** | A pause keeps the open minute in `quote-bars` only, silently | A recording contract promise broken, with no counter to show it |
+| **#122** | The minute pass dropped a minute with no log | `computed-bars` holes that neither `api` nor `store` can explain |
+| **#63** | Open on criterion 5 alone | Closes when #121 does |
 | **#70**, **#71**, **#80** | Store to S3, deploy prod, measure the hop | AWS credentials |
 
 ## Parked by the owner — do not start
@@ -69,4 +64,4 @@ finding. Ten were found here this week and none by inspection.
 
 ## Next action
 
-Read `gh issue view 120`, then run `python tools/loadgen.py check`.
+Read #121's evidence, then write its bus-seam test that pauses with a minute open in all four aggregators.

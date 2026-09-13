@@ -115,6 +115,9 @@ that really was being recorded.
 elapsed while recording was off. The store's rule has not moved: a minute with no
 arrivals produces no row, not nulls and never the previous close.
 
+> **Known defect, split mode — #121.** `measured` 2026-09-13: the minute open at a pause was
+> written on resume to `quote-bars` only; `reference-bars` and `spot-bars` lost it, uncounted.
+
 ## A paused stretch is indistinguishable from an outage
 
 **Decided, and accepted.** The volatility screen already distinguishes three kinds of
