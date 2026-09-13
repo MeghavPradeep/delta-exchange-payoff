@@ -1,42 +1,47 @@
 # The split, what to do next
 
 Open tickets only. Each item names the file or the command. Numbers carry their tag.
+**The GitHub issues are the state of record** and win over this file. Rewritten 2026-09-14.
 
-## Do now
+## Do now, in this order
 
-1. **Re-collect one clean day.** The stack has been recording since 2026-09-12T15:52:27Z.
-   Run `python tools/measure_containers.py` for a full day, then
-   `python tools/measure_computed_gaps.py --root .stack-data --date <day>`. **One run closes
-   two tickets** — #63's criterion 4 and #79's criterion 1 — and adds the two things the I13
-   collection could not: `discord-alerts` inside the main run, and a `store` that consumes
-   throughout. About a day of waiting, ten minutes of work.
-2. **Read #111 before anything else in the code.** A lossless bus reader loses every batch
-   whose pass fails after `XREADGROUP`. On the running stack the api's `bar-buffer` group held
-   `measured` **35,312 pending of 121,056 read — 29.2%** and rising. It reports `lag 0`.
-3. **Rebuild the stack after the next merge.** `discord-alerts`' `/health` changed shape and can
-   now return **503**. The running container is on an older image. On rebuild it reports
-   `unhealthy` whenever the last post failed. That is intended and will look like a regression.
+1. **Land #119 and #118.** #119 holds a restarted `store`'s seal clock at its replay frontier, so
+   the minute open at a restart is folded exactly once into all four tables. It closes **#110**,
+   whose only open criterion it is. #118 settles the two figures that carry two tags.
+2. **Rebuild and restart the stack — #120.** Run `python tools/loadgen.py check`, then
+   `docker compose -p dxp build` and `docker compose -p dxp up -d`, timed to a store flush
+   boundary. That deploys #107, #108, #110, #111, #115 and #119 together. Record `XINFO GROUPS
+   md.option_bar:DELTA:BTC` pending before and after, and read back the first `store.checkpoint`
+   start-up record. **A 503 from `feed` or `discord-alerts` afterwards is intended**, not a regression.
+3. **Close #63 and #79 on the owner's amended criterion.** Both asked for one full day of
+   recording. The owner accepted the evidence already taken on 2026-09-12: 348 minutes with
+   zero interior computed-bar misses (#63), and a 5h12m window holding the busiest hour (#79).
+   #63 waits on #119, because its restart criterion is the minute #110 lost.
 4. **Get AWS credentials.** #70's criteria 2–4, #71 and #80 cannot start without them. #70's
    closing comment lists exactly what a person with credentials runs, in order.
-5. **Decide the epic.** #57 cannot close while #70, #71 and #80 are open. Nothing else blocks it.
+5. **Decide the epic.** #57 closes when #70, #71 and #80 do. Nothing else blocks it.
 
 ## Open, ranked by what it costs to leave alone
 
 | # | What it is | Why it matters |
 |---|---|---|
-| **#111** | A lossless reader loses a batch after `XREADGROUP` and says `lag 0` | **Live data loss**, 29.2% of `md.option_bar` and rising |
-| **#110** | A restart lost the open minute from `computed-bars` only, and left no record | A store restart is silent, so the mechanism is unknown |
-| **#109** | A pause in split mode writes no generation and **no checkpoint** | The watermark stays behind bars on disk |
-| **#108** | `feed` reports `status: ok` while stopped with its budget spent | A 348 s DNS failure kills it permanently |
-| **#107** | The monolith builds its writer with no `publish` | `store.flush_failed` is unreachable on `:8000` |
+| **#120** | The running images predate six merged fixes | Until rebuilt, #111's pending-list loss resumes the moment the stack starts |
+| **#119** | A seal pass during replay loses the minute open at a restart | A seal is final; `store.empty_generation` only makes it visible |
+| **#110** | Held open on its criterion 2 | That criterion **is** #119 |
 | **#118** | `1.0888` and `1,056.4` each carry two tags | 1.0888 is what record 0008's 2.8-core threshold is read against |
-| **#116** | `hld.md` names `/iv-vs-rv`, which 404s | Five routes the engine serves are not listed |
-| **#117** | The R5 check passes with the counter behind a never-true condition | It catches structure, not evaluation |
+| **#63**, **#79** | One criterion each asked for a full day | Closing on an amended criterion, above |
+| **#70**, **#71**, **#80** | Store to S3, deploy prod, measure the hop | AWS credentials |
 
-## Waiting on a person, not on work
+## Parked by the owner — do not start
 
-1. **#70, #71, #80** — AWS credentials. Nothing else is missing.
-2. **#57** — the epic closes when those three do.
+- **IV/RV:** #31, #54, #116 (`hld.md` still names `/iv-vs-rv`, which 404s — that is #116).
+- The worktree `D:/Convex Hedge/dxp-54` (`rv-backfill`) belongs to that work. Leave it.
+
+## Not yet triaged
+
+**#1, #6, #7, #8** — the original build-and-measure study. No comments. Much of what they ask
+for appears built; none carries closing evidence. #8's historical vol surface may fall under
+the IV/RV pause; ask the owner before starting it.
 
 ## The one thing to carry forward
 
@@ -64,4 +69,4 @@ finding. Ten were found here this week and none by inspection.
 
 ## Next action
 
-Start the day's collection: `python tools/loadgen.py check`, then leave the stack alone.
+Read `gh issue view 120`, then run `python tools/loadgen.py check`.

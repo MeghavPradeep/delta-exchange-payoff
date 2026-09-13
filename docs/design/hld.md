@@ -123,13 +123,13 @@ canonical market events only from Redis and drives `/chain`, `/expiries` and `/w
 stream into four Parquet tables; a minute with no arrivals produces no row. In that mode it
 folds `computed.chain` published by the api rather than sampling a cache. The pricing core
 remains pure, and venue IV and Greeks remain reference columns, never inputs.
-**Discord alerts** (`alert_main.py`) are the sixth container: they subscribe only to the
+**Discord alerts** (`alert_main.py`) are the seventh container and sixth service: they subscribe only to the
 `alert` stream in their own consumer group and post to Discord through a configured webhook;
 they never open `feed`, `store` or `api` to do this.
 
 ### 2.6 The public surface and the screens
 
-In split mode, feed has `GET /health`, which is its local `FeedSupervisor.report`. The engine
+In split mode, feed has `GET /health`, its local `FeedSupervisor.report`, served **503** when stopped, paused, out of budget, silent past 135 s, or its bus reader, flusher or control consumer has died (#108). The engine
 serves `/expiries`, `/chain`, `/smile`, `/iv-vs-rv`, `/recording`, `/health` and `/ws/chain`,
 while store has `GET /health`. Its `/health` is authoritative about remote feed state from the
 `feed.connection` and `heartbeat` observations in `FeedConnectionCache`, while retaining process
@@ -139,9 +139,9 @@ its heartbeat-silence rule. Screen commands enter through the existing
 state through the bus. No service-to-service HTTP is added. The default no-`DELTA_BUS` engine
 keeps the existing combined surface and synchronous command path.
 
-`web/` renders and computes nothing. It will wear a badge on the ladder header whenever the feed
-is not `connected`, clearing on recovery (#40); gain a chart panel of a contract's minute candles
-opened by clicking a strike (#46); and gain a time slider whose right edge is live and whose left
+`web/` renders and computes nothing. It wears a badge on the ladder header whenever the feed
+is not `connected`, clearing on recovery (#40); opens a chart panel of a contract's minute candles
+by clicking a strike (#46); and has a time slider whose right edge is live and whose left
 is every stored minute of the day (#45).
 
 ## 3. The connection states

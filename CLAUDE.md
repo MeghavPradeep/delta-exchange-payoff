@@ -15,7 +15,7 @@ wins.** Issue #1 is the whole study; #6–#8 are open, #5 closed (`measured`, `g
 
 ## Commands
 
-Engine (`engine/`, venv at `engine/.venv`; docs say Python 3.13, the venv here is 3.12):
+Engine (`engine/`, venv at `engine/.venv`, Python 3.13 — `measured` 3.13.13 on 2026-09-14):
 
 ```sh
 .venv/Scripts/python.exe -m uvicorn --app-dir src deltapayoff.main:app --port 8000 --reload
@@ -165,8 +165,8 @@ mirrors it field for field. The websocket sends the identical object `/chain` re
 ## Known drift — verify before trusting
 
 **Historical snapshot, dated 2026-09-04 (before `d163bbc`, #62–#66 and #81) — not re-checked
-against today's `main`.** For the current suite size see [AGENTS.md](AGENTS.md) (**1,347**
-tests with Docker, `measured` 2026-09-12).
+against today's `main`.** For the current suite size see [AGENTS.md](AGENTS.md) (**1,606**
+tests with Docker, `measured` 2026-09-12 at `bc3fc43`).
 
 Four docs had fallen behind the code as of that snapshot:
 

@@ -50,7 +50,7 @@ thing and are never used for each other.
 | batch | One pipeline of `XADD`s plus one `XTRIM` per stream it touched. | `redis_bus.py` |
 | **bus flush** | Writing one batch from the outbox to Redis. Always qualified. | `RedisBus.flush` |
 | market-data event | One of the three `md.*` events. Control traffic is not one, and only this resets the staleness clock. | [events.md](docs/design/events.md) |
-| pending list | Redis's per-group list of entries delivered and not yet acked. Nothing here reads it. | [message-bus.md](docs/design/cloud/message-bus.md) §4.1 |
+| pending list | Redis's per-group list of entries delivered and not yet acked. A lossless reader reads it back with `XREADGROUP ... 0` before `>`, so a failed pass strands nothing (#111). | [message-bus.md](docs/design/cloud/message-bus.md) A7 |
 | trim | `XTRIM <stream> MINID ~`, removing entries older than the retention window. | [message-bus.md](docs/design/cloud/message-bus.md) §4.2 |
 | retention | Thirty minutes, by age and never by count. The promise made to a restarting `store`. | the same |
 | consumer group | A named reader of one stream. One per service, never one per instance. | [nomenclature.md](docs/design/cloud/nomenclature.md) §5 |

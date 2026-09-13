@@ -106,7 +106,7 @@ The measured figures are in [split-numbers.md](split-numbers.md).
 2. **Retention is thirty minutes.** A `store` that stops for longer than that loses the
    difference, permanently.
 3. **An alert is not durable.** `discord-alerts` acks on receipt and never replays. A post that
-   fails is gone. It is now logged.
+   fails is gone — logged, counted, its collapse window rolled back, and `/health` answers 503 (#115).
 
 ## 6. Where to read next
 
