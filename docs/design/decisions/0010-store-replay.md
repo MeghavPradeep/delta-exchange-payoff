@@ -94,6 +94,22 @@ replay re-folds it.** Graces are 8.0 s for three tables and 2.0 s for `computed-
 window. **Until a restart holds its seal clock at the replay frontier, it guarantees a minute open
 at shutdown is folded *at most* once per table, never once.**
 
+**R4d (#119) — amends R4c: the window is closed.** R4c stands as the record of the defect. The
+seal clock is now `min(wall, idtime(P_s) for s behind, idtime(D_s) for s catching up)`: `D_s` is
+the writer's **drained** position, and s is catching up until the writer has drained through
+`caught_up_at[s]`, where the reader stood after a group `>` read of s came back short. A short
+`>` read proves Redis held nothing undelivered on s; `behind` never did at a restart, because it
+starts `False` and `_replay` clears it before the first `>` read. **The frontier is not the
+checkpoint's `current_positions()`**, and the checkpoint stays at version 1: a restart must reach
+what the stream holds when it starts, including what arrived after the dead process stopped
+reading, and only Redis knows that. **The valve is structural, not a timer.** Release needs one
+`>` read, not a new entry, so a quiet, trimmed or never-written stream releases within one reader
+pass; only a reader that never completes a pass holds it, and R4a already stops sealing for that
+reader, loudly. `test_store_restart_seam.py`: all six offsets lose nothing, and a minute half read
+before shutdown and half published while down is folded once into all four tables. **A restart
+now folds a minute open at shutdown exactly once per table, while Redis retains it and within
+each table's grace.**
+
 **R9 (#109) — a pause is not a different transaction.** `set_recording(False)`, a
 `control.command` pause or resume, and `aclose` reach one `BarWriter._seal_and_write`, branching
 once on `checkpoint_root`. **In a checkpoint root every flush file carries a generation, from

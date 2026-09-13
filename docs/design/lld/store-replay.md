@@ -86,6 +86,12 @@ derivation. The clock follows the log so replayed events are judged against the 
 live sealing used; once no stream is behind it is the wall clock again. The flush interval
 still uses the wall clock.
 
+**And a stream still catching up pins it too (#119).** `behind` never proved "caught up" at a
+restart, so the minute open at shutdown could seal before the `>` read re-folded it. The clock
+is now also held at `id_seconds(drained[s])` for every stream the writer has not yet drained
+through a **short** `>` read of (`RedisSubscription.caught_up_at`). Release is sticky and needs
+one read, not a new entry, so a quiet or trimmed stream releases within one pass. Record 0010 R4d.
+
 > **History.** `_stream_id_seconds` unpacked three names from `value.split("-", 1)`, which
 > yields two, so from #63 (`83120d6`) it raised `ValueError` on every stream id and
 > `seal_clock`'s `except (TypeError, ValueError): continue` swallowed it: R4 never ran.

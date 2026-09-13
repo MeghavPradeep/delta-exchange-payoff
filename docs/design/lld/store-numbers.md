@@ -76,6 +76,10 @@ property of the graces and says nothing on its own about a loss — but it is al
 #110's window**, the span after a minute ends during which a seal pass on a restarting store
 refuses that minute in table C and keeps it in A, B and D. Record 0010 R4c.
 
+#119 closed the window without touching either grace (record 0010 R4d): a restarted store seals no
+later than its writer has drained until a short `>` read shows each stream caught up. The
+6,000,000 µs difference is still in every checkpoint, and it is no longer the width of a loss.
+
 ## Which suite drives which seam
 
 Moved from [store.md](store.md) §7 at its 200-line bound (#109, 2026-09-12).
@@ -84,4 +88,4 @@ Moved from [store.md](store.md) §7 at its 200-line bound (#109, 2026-09-12).
 - `tests/test_store.py` — the writer and the files
 - `tests/test_recording.py` — the pause over HTTP
 - `tests/test_composition.py` — a scripted socket into the writer's counters
-- `tests/test_store_restart_seam.py` — the seal-versus-replay window (#110)
+- `tests/test_store_restart_seam.py` — the seal-versus-replay window (#110), and its closing (#119)

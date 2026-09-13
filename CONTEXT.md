@@ -82,7 +82,7 @@ steps and two words.
 | flush intent | `<root>/_store-flush-intent.json`, written before the Parquet files and deleted after the checkpoint. | [0010](docs/design/decisions/0010-store-replay.md) R3 |
 | generation | The number in a flush file's name, so two processes cannot collide on one. | the same |
 | replay gap | A counted, alerted hole: the group's position older than the oldest entry the stream still holds. Checked every poll, never only when `store` comes back. | [0010](docs/design/decisions/0010-store-replay.md) R5 |
-| seal clock | `min(wall clock, the time inside the last stream id of any stream still behind)`. | [0010](docs/design/decisions/0010-store-replay.md) R4 |
+| seal clock | `min(wall clock, the time inside the last stream id of any stream still behind, the time inside the last drained id of any stream still catching up)`. A stream stops catching up once drained through a short `>` read. | [0010](docs/design/decisions/0010-store-replay.md) R4, R4d |
 | recording | Whether `store` is folding and flushing. Toggled by a `control.command`. | `store.py` |
 
 ## 4. The market

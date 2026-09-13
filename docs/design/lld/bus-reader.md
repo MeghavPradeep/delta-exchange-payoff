@@ -98,7 +98,7 @@ called caught up seals a minute empty, and nothing corrects that.
 **A stream whose position is still `0-0` is left out**, and that is not a loophole. `0-0` is a
 stream nobody has written to; its time is the Unix epoch, and handing the log clock a `min` of
 zero would stop the store sealing anything ever again — a worse failure than the one being
-repaired.
+repaired. **`caught_up_at` is the positive half #119 added**: written only by a short `>` read, it proves what `behind` cannot.
 
 ## 5. What it counts
 

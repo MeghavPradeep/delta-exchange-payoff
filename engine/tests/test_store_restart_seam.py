@@ -38,6 +38,7 @@ from deltapayoff.events import (
     OptionReference,
     Right,
 )
+from deltapayoff.events.redis_wire import encode, stream_name
 from deltapayoff.redis_bus import BusConfig, RedisBus
 from deltapayoff.store import (
     COMPUTED_DATASET,
@@ -98,48 +99,50 @@ def _factory(server):
     return factory
 
 
-def _stamp(minute: int) -> datetime:
-    return BASE + timedelta(minutes=minute, seconds=5)
+def _stamp(minute: int, seconds: float = 5.0) -> datetime:
+    return BASE + timedelta(minutes=minute, seconds=seconds)
 
 
-def _quote_event(minute: int, bid: float = 100.0) -> OptionQuote:
+def _quote_event(minute: int, bid: float = 100.0, seconds: float = 5.0) -> OptionQuote:
     return OptionQuote(
         source="feed",
-        ts_venue=_stamp(minute),
-        ts_received=_stamp(minute),
+        ts_venue=_stamp(minute, seconds),
+        ts_received=_stamp(minute, seconds),
         instrument=INSTRUMENT,
         bid=bid,
         ask=bid + 1.0,
     )
 
 
-def _reference_event(minute: int, mark: float = 100.5) -> OptionReference:
+def _reference_event(
+    minute: int, mark: float = 100.5, seconds: float = 5.0
+) -> OptionReference:
     return OptionReference(
         source="feed",
-        ts_venue=_stamp(minute),
-        ts_received=_stamp(minute),
+        ts_venue=_stamp(minute, seconds),
+        ts_received=_stamp(minute, seconds),
         instrument=INSTRUMENT,
         mark=mark,
     )
 
 
-def _spot_event(minute: int, spot: float = 60_000.0) -> IndexQuote:
+def _spot_event(minute: int, spot: float = 60_000.0, seconds: float = 5.0) -> IndexQuote:
     return IndexQuote(
         source="feed",
-        ts_venue=_stamp(minute),
-        ts_received=_stamp(minute),
+        ts_venue=_stamp(minute, seconds),
+        ts_received=_stamp(minute, seconds),
         underlying="BTC",
         spot=spot,
     )
 
 
-def _computed_event(minute: int, iv: float = 0.4) -> ComputedChain:
+def _computed_event(minute: int, iv: float = 0.4, seconds: float = 5.0) -> ComputedChain:
     return ComputedChain(
         source="chain-cache",
-        ts_received=_stamp(minute),
+        ts_received=_stamp(minute, seconds),
         underlying="BTC",
         expiry=date(2026, 9, 27),
-        fetched_at=_stamp(minute),
+        fetched_at=_stamp(minute, seconds),
         forward=60_000.0,
         discount=1.0,
         years_to_expiry=0.01,
@@ -172,7 +175,9 @@ def _publish_minute(bus: RedisBus, minute: int) -> None:
     bus.publish(_computed_event(minute))
 
 
-async def _make_process(root: Path, server, clock: Clock) -> store_main.StoreProcess:
+async def _make_process(
+    root: Path, server, clock: Clock, factory=None
+) -> store_main.StoreProcess:
     bus = RedisBus(
         BusConfig(
             venue="DELTA",
@@ -186,9 +191,66 @@ async def _make_process(root: Path, server, clock: Clock) -> store_main.StorePro
             # whatever the hour of the run happened to make it trim.
             retention_seconds=1_000_000_000.0,
         ),
-        client_factory=_factory(server),
+        client_factory=factory or _factory(server),
     )
     return await store_main._prepare_process(root=root, bus=bus, clock=clock)
+
+
+def _gated_factory(server, gate: asyncio.Event):
+    """A client whose group `>` reads wait on `gate`. Replay (`XREAD`) and the pending
+    list read (`XREADGROUP ... 0`) pass straight through.
+
+    This is the live hole in one device: `_replay` has delivered `(checkpoint,
+    last-delivered]` and cleared `behind`, and the first `>` read -- the one that
+    delivers what was published while `store` was down -- has not come back yet.
+    """
+    import fakeredis.aioredis
+
+    def factory(_config: BusConfig):
+        client = fakeredis.aioredis.FakeRedis(server=server, decode_responses=False)
+        original = client.xreadgroup
+
+        async def xreadgroup(group, consumer, streams, *args, **kwargs):
+            if all(_text(value) == ">" for value in streams.values()):
+                await gate.wait()
+            return await original(group, consumer, streams, *args, **kwargs)
+
+        client.xreadgroup = xreadgroup
+        return client
+
+    return factory
+
+
+def _text(value) -> str:
+    return value.decode() if isinstance(value, (bytes, bytearray)) else str(value)
+
+
+async def _xadd_minute(
+    client, minute: int, seconds: float, *, bid: float, iv: float
+) -> None:
+    """One arrival per stream inside `minute`, **with the entry id on the fixture's
+    clock**: `seconds` into the minute plus 100 ms of transit.
+
+    `RedisBus.publish` lets Redis stamp the id with the machine's own clock, which is a
+    day away from `BASE`. R4's log clock reads time out of those ids, so a test that
+    wants to watch the log clock pin has to own them.
+    """
+    ms = int((_stamp(minute, seconds).timestamp() + 0.1) * 1000)
+    for event in (
+        _quote_event(minute, bid=bid, seconds=seconds),
+        _reference_event(minute, mark=bid + 0.5, seconds=seconds),
+        _spot_event(minute, spot=60_000.0 + bid, seconds=seconds),
+        _computed_event(minute, iv=iv, seconds=seconds),
+    ):
+        await client.xadd(stream_name(event, venue="DELTA"), encode(event), id=f"{ms}-0")
+
+
+def _drain(process: store_main.StoreProcess) -> None:
+    """One drain pass exactly as `BarWriter.run` performs it: empty the queue, then
+    record the drained position. The second half is what a restart's seal clock reads."""
+    while not process.subscription.queue.empty():
+        process.writer.ingest(process.subscription.queue.get_nowait())
+    process.writer._finish_drain_pass()
 
 
 async def _kill(process: store_main.StoreProcess) -> None:
@@ -326,14 +388,14 @@ def test_the_four_graces_put_a_six_second_window_on_the_checkpoint(
 
 
 @pytest.mark.parametrize(
-    ("offset", "expected_losers"),
+    "offset",
     [
-        (0.0, set()),
-        (COMPUTED_SPLIT_GRACE_SECONDS - 0.1, set()),
-        (COMPUTED_SPLIT_GRACE_SECONDS, {COMPUTED_DATASET}),
-        (COMPUTED_SPLIT_GRACE_SECONDS + 3.0, {COMPUTED_DATASET}),
-        (TICKER_GRACE_SECONDS - 0.1, {COMPUTED_DATASET}),
-        (TICKER_GRACE_SECONDS, set(TABLES)),
+        0.0,
+        COMPUTED_SPLIT_GRACE_SECONDS - 0.1,
+        COMPUTED_SPLIT_GRACE_SECONDS,
+        COMPUTED_SPLIT_GRACE_SECONDS + 3.0,
+        TICKER_GRACE_SECONDS - 0.1,
+        TICKER_GRACE_SECONDS,
     ],
     ids=[
         "at-the-edge",
@@ -345,10 +407,18 @@ def test_the_four_graces_put_a_six_second_window_on_the_checkpoint(
     ],
 )
 def test_a_seal_pass_during_the_replay_loses_the_open_minute_grace_by_grace(
-    tmp_path: Path, offset: float, expected_losers: set[str]
+    tmp_path: Path, offset: float
 ) -> None:
-    """**#110's mechanism.** The restart is not what loses the minute. *A seal pass that
-    runs before the replay has re-folded it* is.
+    """**#119 closed the window #110 measured: all six offsets now lose nothing.**
+
+    Before #119 the losers were none, none, `computed-bars`, `computed-bars`,
+    `computed-bars`, all four -- record 0010 R4c. The seal pass below is now the drain
+    loop's own call, `_seal(seal_clock())`, where #110's reproduction passed the wall
+    clock straight in; with #119's fix reverted this call reproduces #110's table exactly,
+    which is the red run that makes the green one mean something.
+
+    #110's mechanism, which is unchanged underneath: the restart is not what loses the
+    minute. *A seal pass that runs before the replay has re-folded it* is.
 
     `BarWriter.run` seals on **every** pass of its drain loop, including the passes where
     the queue is empty because the readers are still replaying — `_seal` is below the
@@ -406,7 +476,7 @@ def test_a_seal_pass_during_the_replay_loses_the_open_minute_grace_by_grace(
             # at this instant is whatever the replay has managed, and the clock has
             # moved on by `offset` past the end of the open minute.
             clock.value = OPEN_MINUTE_END + offset
-            second.writer._seal(clock())
+            second.writer._seal(second.writer.seal_clock())
 
             # Now the replay lands. `_seen` rather than `_folded`: a refused tick is the
             # outcome under test, so waiting on `ticks` would hang on exactly the runs
@@ -415,13 +485,17 @@ def test_a_seal_pass_during_the_replay_loses_the_open_minute_grace_by_grace(
                 lambda: second.subscription.offered == 4,
                 message="the replay did not re-deliver the four events",
             )
-            while not second.subscription.queue.empty():
-                second.writer.ingest(second.subscription.queue.get_nowait())
+            _drain(second)
             assert _seen(second.writer) == 4
 
-            # Seal well past every grace, and commit, so nothing is left open.
+            # Seal well past every grace, and commit, so nothing is left open. **This
+            # seal does not prove the hold releases**: `bus.publish` lets Redis stamp
+            # these ids with the machine's clock, a day past `BASE`, so a hold pinned at
+            # them is still later than the fixture's wall and seals anyway (`measured`
+            # #119: a never-release sabotage leaves all six green). The release is
+            # proven where the ids are on the fixture's clock -- the three tests below.
             clock.value = OPEN_MINUTE_END + 600.0
-            second.writer._seal(clock())
+            second.writer._seal(second.writer.seal_clock())
             second.writer._commit()
         finally:
             await _kill(second)
@@ -429,11 +503,271 @@ def test_a_seal_pass_during_the_replay_loses_the_open_minute_grace_by_grace(
         minute = _stamp(OPEN_MINUTE).strftime("%H:%M")
         on_disk = _minutes_on_disk(tmp_path)
         losers = {dataset for dataset in TABLES if minute not in on_disk[dataset]}
-        assert losers == expected_losers, (
+        assert losers == set(), (
             f"at minute_end+{offset}s the tables missing {minute} were "
-            f"{sorted(losers)}, expected {sorted(expected_losers)}; on disk: "
+            f"{sorted(losers)}; on disk: "
             f"{ {k: sorted(v) for k, v in on_disk.items()} }"
         )
+
+    asyncio.run(scenario())
+
+
+# --------------------------------------------------------------------------- #119
+
+
+def _rows_for(root: Path, dataset: str, minute: str):
+    frame = BarStore(root, dataset=dataset, schema=_SCHEMAS[dataset]).scan().collect()
+    return [
+        row
+        for row in frame.iter_rows(named=True)
+        if row["minute"].strftime("%H:%M") == minute
+    ]
+
+
+def test_a_restart_with_a_minute_open_folds_it_exactly_once_into_all_four_tables(
+    tmp_path: Path,
+) -> None:
+    """**#110's criterion 2, which #119 exists to meet.**
+
+    The live shape of 2026-09-12, not only the test-sized one. Half of the open minute
+    was read by the store that died (`e1`, `:05`); the other half was published while
+    nothing was reading (`e2`, `:40`) -- the `store`'s readers had given up twenty
+    seconds before the process exited. So the replay alone does not finish the minute:
+    `(checkpoint, last-delivered]` delivers `e1`, and only the group's first `>` read
+    delivers `e2`.
+
+    That first `>` read is gated, and the store seals **twice** in the gap, at
+    `minute_end + 8` and at `minute_end + 600`. `behind_streams()` already says caught
+    up there -- `_replay` cleared it -- which is the signal R4 was reading. The seal
+    clock must hold at the log instead, and then release once `e2` is drained.
+
+    **Exactly once, per table, and asserted both ways:** one row for the minute (no
+    duplicate), holding both arrivals (no truncation, no loss) -- tick counts where the
+    table has them, `e2`'s value where it does not -- and no tick refused anywhere.
+    """
+
+    async def scenario() -> None:
+        import fakeredis.aioredis
+
+        server = fakeredis.aioredis.FakeServer()
+        clock = Clock((BASE + timedelta(minutes=OPEN_MINUTE, seconds=30)).timestamp())
+        first = await _make_process(tmp_path, server, clock)
+        try:
+            await _xadd_minute(first.bus.client, OPEN_MINUTE, 5.0, bid=100.0, iv=0.4)
+            await wait_until(
+                lambda: first.subscription.offered == 4,
+                message="e1 did not reach the first store",
+            )
+            _drain(first)
+            assert _folded(first.writer) == 4
+            await first.writer.aclose()  # the shutdown commit, minute still open
+        finally:
+            await _kill(first)
+        assert _minutes_on_disk(tmp_path) == {dataset: set() for dataset in TABLES}
+
+        # e2, while the store is down.
+        writer = fakeredis.aioredis.FakeRedis(server=server, decode_responses=False)
+        try:
+            await _xadd_minute(writer, OPEN_MINUTE, 40.0, bid=110.0, iv=0.5)
+        finally:
+            await writer.aclose()
+
+        gate = asyncio.Event()
+        clock.value = (BASE + timedelta(minutes=OPEN_MINUTE, seconds=57.5)).timestamp()
+        second = await _make_process(
+            tmp_path, server, clock, factory=_gated_factory(server, gate)
+        )
+        try:
+            await wait_until(
+                lambda: second.subscription.offered == 4,
+                message="the replay did not re-deliver e1",
+            )
+            _drain(second)
+            # The old signal says caught up; the reader has not read `>` once.
+            assert second.subscription.behind_streams() == ()
+            assert second.subscription.caught_up_at == {}
+            assert set(second.writer.catching_up_streams()) == set(
+                second.subscription.streams
+            )
+            e1_seconds = int((_stamp(OPEN_MINUTE, 5.0).timestamp() + 0.1) * 1000) / 1000
+
+            for offset in (TICKER_GRACE_SECONDS, 600.0):
+                clock.value = OPEN_MINUTE_END + offset
+                held = second.writer.seal_clock()
+                # It follows the log -- the time inside the last drained id -- rather
+                # than freezing: a hold that froze is #103's shape.
+                assert held == pytest.approx(e1_seconds, abs=0.001), (
+                    f"at minute_end+{offset}s the seal clock was {held}, not the "
+                    f"drained log position {e1_seconds}"
+                )
+                second.writer._seal(held)
+
+            gate.set()
+            await wait_until(
+                lambda: second.subscription.offered == 8,
+                message="the group's > read did not deliver e2",
+            )
+            _drain(second)
+            assert second.writer.catching_up_streams() == ()
+            assert second.writer.seal_clock() == clock.value
+            second.writer._seal(second.writer.seal_clock())
+            second.writer._commit()
+
+            for dataset, aggregator in _aggregators(second.writer).items():
+                assert (aggregator.late, aggregator.already_flushed) == (0, 0), (
+                    f"{dataset} refused a tick of the open minute: late="
+                    f"{aggregator.late}, already_flushed={aggregator.already_flushed}"
+                )
+        finally:
+            await _kill(second)
+
+        minute = _stamp(OPEN_MINUTE).strftime("%H:%M")
+        counts = {
+            DATASET: "bid_ticks",
+            REFERENCE_DATASET: "mark_ticks",
+            SPOT_DATASET: "spot_ticks",
+        }
+        for dataset in TABLES:
+            rows = _rows_for(tmp_path, dataset, minute)
+            assert len(rows) == 1, f"{dataset} holds {len(rows)} rows for {minute}"
+            if dataset in counts:
+                assert rows[0][counts[dataset]] == 2, (
+                    f"{dataset} folded {rows[0][counts[dataset]]} of the open minute's "
+                    f"2 arrivals"
+                )
+            else:
+                assert rows[0]["iv"] == pytest.approx(0.5), (
+                    f"{dataset} did not fold e2, the arrival published while down"
+                )
+
+    asyncio.run(scenario())
+
+
+def test_a_quiet_or_never_written_stream_does_not_hold_the_seal_clock(
+    tmp_path: Path,
+) -> None:
+    """**The valve, case one.** Thirty minutes with no traffic at all on any stream, and
+    `computed.chain` never written to. Neither may keep a restarted store from sealing.
+
+    The release needs no new entry: it needs the reader's first `>` read to come back
+    short, which a live reader does within one pass whether or not anything is being
+    published, and the writer to have drained through where that read left it.
+    """
+
+    async def scenario() -> None:
+        import fakeredis.aioredis
+
+        server = fakeredis.aioredis.FakeServer()
+        clock = Clock((BASE + timedelta(minutes=0, seconds=30)).timestamp())
+        first = await _make_process(tmp_path, server, clock)
+        try:
+            ms = int((_stamp(0).timestamp() + 0.1) * 1000)
+            for event in (_quote_event(0), _reference_event(0), _spot_event(0)):
+                await first.bus.client.xadd(
+                    stream_name(event, venue="DELTA"), encode(event), id=f"{ms}-0"
+                )
+            await wait_until(
+                lambda: first.subscription.offered == 3,
+                message="minute 0 did not reach the first store",
+            )
+            _drain(first)
+            clock.value = (BASE + timedelta(minutes=2)).timestamp()
+            first.writer._seal(first.writer.seal_clock())
+            first.writer._commit()
+        finally:
+            await _kill(first)
+
+        clock.value = (BASE + timedelta(minutes=30)).timestamp()
+        second = await _make_process(tmp_path, server, clock)
+        try:
+            await wait_until(
+                lambda: set(second.subscription.caught_up_at)
+                == set(second.subscription.streams),
+                message="the restarted reader never completed a > read",
+            )
+            _drain(second)
+            assert second.writer.catching_up_streams() == ()
+            assert second.writer.seal_clock() == clock.value
+            second.writer._seal(second.writer.seal_clock())
+            boundary = int((clock.value - TICKER_GRACE_SECONDS) * 1e6) - 60_000_000
+            assert second.writer.aggregator._sealed_through_us == boundary, (
+                "a quiet restart did not seal on the wall clock"
+            )
+        finally:
+            await _kill(second)
+
+    asyncio.run(scenario())
+
+
+def test_a_stream_trimmed_to_nothing_does_not_stop_the_store_sealing(
+    tmp_path: Path,
+) -> None:
+    """**The valve, case two.** The store is down past retention and every stream is
+    trimmed empty, so each stream's `last-generated-id` names an entry that no longer
+    exists and never will be delivered.
+
+    A hold waiting for that id would never release -- the rejected horizon design, and
+    the store-stops-sealing failure #103 was. This one releases on the first short `>`
+    read, loses exactly the minute Redis trimmed, and goes on to seal the next minute
+    that arrives into all four tables.
+    """
+
+    async def scenario() -> None:
+        import fakeredis.aioredis
+
+        server = fakeredis.aioredis.FakeServer()
+        clock = Clock((BASE + timedelta(minutes=OPEN_MINUTE, seconds=30)).timestamp())
+        first = await _make_process(tmp_path, server, clock)
+        try:
+            await _xadd_minute(first.bus.client, OPEN_MINUTE, 5.0, bid=100.0, iv=0.4)
+            await wait_until(
+                lambda: first.subscription.offered == 4,
+                message="the open minute did not reach the first store",
+            )
+            _drain(first)
+            await first.writer.aclose()
+        finally:
+            await _kill(first)
+
+        trimmer = fakeredis.aioredis.FakeRedis(server=server, decode_responses=False)
+        try:
+            for key in first.subscription.streams:
+                await trimmer.xtrim(key, maxlen=0, approximate=False)
+                info = await trimmer.xinfo_stream(key)
+                assert int(info.get("length", info.get(b"length"))) == 0
+        finally:
+            await trimmer.aclose()
+
+        clock.value = (BASE + timedelta(minutes=40)).timestamp()
+        second = await _make_process(tmp_path, server, clock)
+        try:
+            await wait_until(
+                lambda: set(second.subscription.caught_up_at)
+                == set(second.subscription.streams),
+                message="the restarted reader never completed a > read",
+            )
+            _drain(second)
+            assert second.writer.catching_up_streams() == ()
+            assert second.writer.seal_clock() == clock.value
+
+            await _xadd_minute(second.bus.client, 40, 5.0, bid=120.0, iv=0.6)
+            await wait_until(
+                lambda: second.subscription.offered == 4,
+                message="minute 40 did not reach the restarted store",
+            )
+            _drain(second)
+            clock.value = (BASE + timedelta(minutes=42)).timestamp()
+            second.writer._seal(second.writer.seal_clock())
+            second.writer._commit()
+        finally:
+            await _kill(second)
+
+        on_disk = _minutes_on_disk(tmp_path)
+        for dataset in TABLES:
+            assert on_disk[dataset] == {"10:40"}, (
+                f"{dataset} holds {sorted(on_disk[dataset])}: the trimmed minute 10:02 "
+                f"is the genuine loss and 10:40 must still seal"
+            )
 
     asyncio.run(scenario())
 

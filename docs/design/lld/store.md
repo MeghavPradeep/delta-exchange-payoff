@@ -143,8 +143,10 @@ our arrival time is the one thing this design exists not to do.
 
 **Never forward-fill.** A minute with no arrivals produces no row — not nulls, never the previous
 close — in every table. The monolith writes a partial stop bar with true tick counts; the store
-process checkpoints the partial open minute, so a restart inside the `derived` thirty-minute Redis
-retention completes it rather than sealing a truncated bar. A stop longer than that retention loses
+process checkpoints the partial open minute and, restarted, seals no later than its writer has
+drained until a short `>` read shows each stream caught up ([0010](../decisions/0010-store-replay.md)
+R4d, #119). So a restart inside the `derived` thirty-minute Redis retention folds that minute
+exactly once into all four tables, never a truncated bar. A stop longer than that retention loses
 the minutes trimmed from Redis, and the gap signal reports them.
 
 ## 5. Failure modes
@@ -194,6 +196,4 @@ real adapter through `tests/fakes/decoder.py`. Which suite drives which seam is 
 
 ## 8. Numbers
 
-Every measured and derived number behind this design, with the run that produced it, is in
-[store-numbers.md](store-numbers.md). Evidence grows and a design does not -- the same move
-#62 made for the HLD and #63 made for the logging catalogue.
+Every number behind this design, with the run that produced it: [store-numbers.md](store-numbers.md).

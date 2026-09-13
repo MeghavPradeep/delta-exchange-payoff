@@ -340,6 +340,7 @@ class RedisSubscription(Subscription):
         "last_ids",
         "positions",
         "behind",
+        "caught_up_at",
         "span_dropped",
         "skipped",
         "resyncs",
@@ -394,6 +395,18 @@ class RedisSubscription(Subscription):
             key: self.start_ids.get(key, Position("0-0", 0)) for key in streams
         }
         self.behind: dict[str, bool] = dict.fromkeys(streams, False)
+        #: Per stream, the position this reader held just after a group `>` read that
+        #: came back **short** -- fewer than `read_count` entries, or none. #119.
+        #:
+        #: **Only a `>` read writes it**, and that is the difference from `behind`.
+        #: `behind` starts `False` before anything has been read, and `_replay` clears it
+        #: when the replay ends, before the `>` read has delivered what was published
+        #: while nothing was reading; both say "caught up" without any read having
+        #: shown it. A short `>` read does show it: Redis returned everything the group
+        #: had not yet delivered on that stream at that instant, so every entry the
+        #: stream held at start-up is at or before this position. A stream absent here
+        #: has not been shown caught up, whatever `behind` says.
+        self.caught_up_at: dict[str, Position] = {}
         self.span_dropped = 0
         #: Entries this reader never received, counted at the jump. **Redis trims
         #: silently and ours never has.** Always zero on a lossless subscription.
@@ -1340,6 +1353,7 @@ class RedisBus:
         if not got:
             for key in sub.streams:
                 sub.behind[key] = False
+                sub.caught_up_at[key] = sub.positions.get(key, Position("0-0", 0))
             await asyncio.sleep(self.config.idle_sleep_seconds)
             return
         # **Acked on receipt, before the work.** The flush is the durability boundary,
@@ -1360,6 +1374,10 @@ class RedisBus:
             self._deliver(sub, name, entries)
         for key, is_full in full_reads.items():
             sub.behind[key] = is_full
+        # After `_deliver`, so the position recorded is past the short read's own batch.
+        for key in sub.streams:
+            if not full_reads.get(key, False):
+                sub.caught_up_at[key] = sub.positions.get(key, Position("0-0", 0))
 
     async def _read_head(self, sub: RedisSubscription) -> None:
         """Drop-oldest: no group, everything a read gives, and a jump when far behind.
