@@ -23,10 +23,16 @@ import assert from "node:assert/strict";
 import type { ChainResponse, ChainRow, Leg } from "@/lib/contract";
 import {
   cumulative,
+  daysToExpiry,
   gammaCoverage,
   gexByStrike,
+  levels,
   oiByStrike,
   peak,
+  peakStrike,
+  sideTotals,
+  strikeWindow,
+  sumBoards,
   total,
   zeroCrossStrike,
 } from "@/lib/exposure";
@@ -239,6 +245,128 @@ check("THE PEAK IS THE LARGEST BAR EITHER SIDE, AND AN EMPTY BOARD PEAKS AT ZERO
     70,
   );
   assert.equal(peak([]), 0, "never -Infinity, which would reach an axis attribute");
+});
+
+
+// --- many expiries, and the panels read off the board ----------------------------
+
+/** A bar, written out. These tests are about the folds above, not about a chain. */
+function bar(strike: number, call: number | null, put: number | null) {
+  return { strike, call, put, net: (call ?? 0) - (put ?? 0) };
+}
+
+check("BOARDS SUM STRIKE BY STRIKE, OVER THE UNION OF THEIR STRIKES", () => {
+  const summed = sumBoards([
+    [bar(99_000, 10, 5), bar(100_000, 20, 8)],
+    [bar(100_000, 3, 2), bar(101_000, 7, 1)],
+  ]);
+  assert.deepEqual(
+    summed.map((b) => [b.strike, b.call, b.put, b.net]),
+    [
+      [99_000, 10, 5, 5],
+      [100_000, 23, 10, 13],
+      [101_000, 7, 1, 6],
+    ],
+  );
+});
+
+check("AN ABSENCE SUMMED WITH AN ABSENCE STAYS ABSENT, AND NEVER BECOMES ZERO", () => {
+  const summed = sumBoards([[bar(100_000, null, null)], [bar(100_000, null, 4)]]);
+  assert.equal(summed[0]!.call, null, "no expiry listed a call here");
+  assert.equal(summed[0]!.put, 4, "one did list a put, and it stands alone");
+});
+
+check("SUMMING ONE BOARD IS THAT BOARD, AND SUMMING NONE IS EMPTY", () => {
+  const one = [bar(100_000, 10, 5)];
+  assert.deepEqual(sumBoards([one]), one);
+  assert.deepEqual(sumBoards([]), []);
+});
+
+check("THE STRIKE WINDOW IS COUNTED IN LISTED STRIKES, CENTRED ON THE MONEY", () => {
+  const board = [98, 99, 100, 101, 102].map((k) => bar(k * 1000, 1, 1));
+  assert.deepEqual(
+    strikeWindow(board, 100_000, 1).map((b) => b.strike),
+    [99_000, 100_000, 101_000],
+  );
+  assert.equal(strikeWindow(board, 100_000, null).length, 5, "ALL is the whole board");
+  assert.equal(strikeWindow(board, null, 1).length, 5, "nothing to centre on: show it all");
+  assert.equal(strikeWindow(board, 100_000, 99).length, 5, "wider than the board is the board");
+});
+
+check("THE WINDOW CENTRES ON THE NEAREST STRIKE WHEN THE ATM ONE IS NOT ON THE BOARD", () => {
+  // A summed board need not carry the ATM strike of any one expiry.
+  const board = [98, 99, 101, 102].map((k) => bar(k * 1000, 1, 1));
+  assert.deepEqual(
+    strikeWindow(board, 100_000, 1).map((b) => b.strike),
+    [98_000, 99_000, 101_000],
+  );
+});
+
+check("THE TOTALS AND THE PUT/CALL RATIO, PUTS OVER CALLS", () => {
+  const board = [bar(99_000, 10, 20), bar(100_000, 30, null)];
+  assert.deepEqual(sideTotals(board), { call: 40, put: 20, pcr: 0.5 });
+  assert.equal(
+    sideTotals([bar(99_000, 0, 5)]).pcr,
+    null,
+    "a ratio with nothing underneath is not a large ratio",
+  );
+  assert.deepEqual(sideTotals([]), { call: 0, put: 0, pcr: null });
+});
+
+check("THE WALL IS THE LARGEST BAR ON ITS OWN SIDE", () => {
+  const board = [bar(99_000, 10, 40), bar(100_000, 70, 5)];
+  assert.equal(peakStrike(board, "call"), 100_000);
+  assert.equal(peakStrike(board, "put"), 99_000);
+  assert.equal(peakStrike([bar(99_000, null, null)], "call"), null, "nothing there to be largest");
+});
+
+check("LEVELS RANK BY SIZE: POSITIVE IS RESISTANCE, NEGATIVE IS SUPPORT", () => {
+  const board = [
+    bar(23_500, 0, 320),   // net -320
+    bar(23_700, 0, 218),   // net -218
+    bar(24_000, 712, 0),   // net +712
+    bar(24_200, 560, 0),   // net +560
+    bar(24_400, 0, 0),     // net 0 — neither, and in neither list
+  ];
+  const { resistances, supports } = levels(board, 4);
+  assert.deepEqual(
+    resistances.map((l) => [l.rank, l.strike, l.value]),
+    [
+      [1, 24_000, 712],
+      [2, 24_200, 560],
+    ],
+  );
+  assert.deepEqual(
+    supports.map((l) => [l.rank, l.strike, l.value]),
+    [
+      [1, 23_500, -320],
+      [2, 23_700, -218],
+    ],
+    "supports rank by magnitude, so the most negative is S1",
+  );
+});
+
+check("LEVELS ARE NOT FILTERED BY WHERE SPOT HAPPENS TO BE STANDING", () => {
+  // A large positive strike below the money is still where the gamma is.
+  const board = [bar(20_000, 900, 0), bar(24_000, 100, 0)];
+  assert.equal(levels(board, 4).resistances[0]!.strike, 20_000);
+});
+
+check("DTE COUNTS TO THE 12:00 UTC SETTLEMENT, NOT TO MIDNIGHT, AND NEVER GOES NEGATIVE", () => {
+  // 13-04-2026 settles at 12:00Z. From 10-04 09:15 IST (03:45Z) that is 3 days and 8¼
+  // hours, which is 3D — the reference terminal's own reading of the same pair.
+  assert.equal(daysToExpiry("13-04-2026", new Date("2026-04-10T03:45:00Z")), 3);
+  assert.equal(
+    daysToExpiry("13-04-2026", new Date("2026-04-13T06:00:00Z")),
+    0,
+    "expiry morning is 0D, not 1D: half a trading day is not a day",
+  );
+  assert.equal(
+    daysToExpiry("13-04-2026", new Date("2026-04-20T00:00:00Z")),
+    0,
+    "already settled reads 0D, never a negative wearing a future date",
+  );
+  assert.equal(daysToExpiry("not-a-date", new Date()), null);
 });
 
 if (failures > 0) {

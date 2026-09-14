@@ -14,12 +14,19 @@ import type { ViewRequest } from "@/lib/view";
  * a claim about a convention, and each of the three below is one somebody would otherwise
  * have to reverse-engineer off an axis.
  */
-export default function GexScreen({ initial }: { initial: ViewRequest }) {
+export default function GexScreen({
+  initial,
+  initialExpiries,
+}: {
+  initial: ViewRequest;
+  initialExpiries: string[];
+}) {
   return (
     <ExposureScreen
       initial={initial}
+      initialExpiries={initialExpiries}
+      board="gex"
       title="Gamma exposure"
-      heading="Dealer gamma by strike, USD per 1% move"
       project={gexByStrike}
       refusal={(chain) =>
         chain.spot === null
@@ -28,9 +35,17 @@ export default function GexScreen({ initial }: { initial: ViewRequest }) {
       }
       axisTitle="USD per 1% move"
       format={formatUsdCompact}
-      showCumulative
-      coverage={(chain) => {
-        const { solved, total } = gammaCoverage(chain);
+      coverage={(chains) => {
+        // Summed across every checked expiry: the board is their total, so its coverage
+        // has to be too. One expiry solving cleanly does not qualify a board that another
+        // contributed half of.
+        let solved = 0;
+        let total = 0;
+        for (const chain of chains) {
+          const count = gammaCoverage(chain);
+          solved += count.solved;
+          total += count.total;
+        }
         if (total === 0) return null;
         if (solved === total) return `all ${total} strikes carry a computed gamma`;
         return `${solved} of ${total} strikes carry a computed gamma — the rest contribute nothing`;
@@ -52,10 +67,13 @@ export default function GexScreen({ initial }: { initial: ViewRequest }) {
           Our gamma is a derivative with respect to the <em>forward</em> and the dollars
           square <em>spot</em>; within a day the two agree to well under a percent, which
           is below the resolution of a bar, but the axis is built that way and says so
-          rather than pretending otherwise. The faint line is the running total across the
-          board, and the marked strike is where it changes sign — that is a fact about this
-          board as it stands, not the price at which exposure would flip, which would mean
-          re-pricing every gamma at every spot.
+          rather than pretending otherwise. <strong>The FLIP line keeps a familiar name for
+          a smaller claim.</strong> It is the strike at which the running total across the
+          board changes sign — a fact about this board as it stands, not the price at which
+          exposure would actually turn, which would mean re-pricing every gamma at every
+          spot and is not something this payload can support. The ranked strikes beside the
+          chart are ordered by the size of their net gamma, not by their distance from
+          spot: a large positive strike below the price is still where the gamma is.
         </>
       }
     />

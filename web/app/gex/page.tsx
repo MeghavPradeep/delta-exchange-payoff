@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import GexScreen from "@/components/GexScreen";
-import { parseView } from "@/lib/view";
+import { firstParam, parseExpiries, parseView } from "@/lib/view";
 
 export const metadata: Metadata = {
   title: "Gamma exposure",
@@ -24,5 +24,11 @@ export default async function GexPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  return <GexScreen initial={parseView(await searchParams)} />;
+  const params = await searchParams;
+  return (
+    <GexScreen
+      initial={parseView(params)}
+      initialExpiries={parseExpiries(firstParam(params.expiry))}
+    />
+  );
 }

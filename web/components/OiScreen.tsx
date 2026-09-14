@@ -18,17 +18,23 @@ import type { ViewRequest } from "@/lib/view";
  * sign change is read off; here it would just be a number that grows, and a line that
  * only ever goes up says nothing a reader could use.
  */
-export default function OiScreen({ initial }: { initial: ViewRequest }) {
+export default function OiScreen({
+  initial,
+  initialExpiries,
+}: {
+  initial: ViewRequest;
+  initialExpiries: string[];
+}) {
   return (
     <ExposureScreen
       initial={initial}
+      initialExpiries={initialExpiries}
+      board="oi"
       title="Open interest"
-      heading="Open interest by strike, in contracts"
       project={oiByStrike}
       refusal={() => "This chain lists no strikes."}
       axisTitle="contracts"
       format={formatOi}
-      showCumulative={false}
       note={
         <>
           Open interest in <strong>contracts</strong>, which is what the venue publishes
