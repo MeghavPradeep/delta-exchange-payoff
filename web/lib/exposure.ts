@@ -176,3 +176,162 @@ export function peak(bars: StrikeBar[]): number {
 export function total(bars: StrikeBar[]): number {
   return bars.reduce((sum, bar) => sum + bar.net, 0);
 }
+
+/* ------------------------------------------------------------------ many expiries
+ *
+ * The expiries panel checks more than one board at a time, and a checked board is
+ * **summed into** the others rather than drawn beside them: the question these screens
+ * answer is what the dealer's position is at a strike, and a strike carries whatever is
+ * open against it whenever it expires. The engine serves one expiry per subscription, so
+ * the summing happens here, on projections that have already been made — never on the
+ * chains themselves, because two expiries at one strike are two different contracts with
+ * two different volatilities and nothing about them should be averaged.
+ */
+
+/**
+ * Several boards summed strike by strike.
+ *
+ * The union of every strike, ascending. A strike listed on one expiry and not another
+ * contributes only where it is listed, which is the same rule as a leg contributing only
+ * where it solved: `null + null` stays `null`, and `null + 3` is `3`. A column of
+ * absences must not become a zero just because something else was present at that strike.
+ */
+export function sumBoards(boards: StrikeBar[][]): StrikeBar[] {
+  const byStrike = new Map<number, { call: number | null; put: number | null }>();
+  for (const board of boards) {
+    for (const bar of board) {
+      const held = byStrike.get(bar.strike) ?? { call: null, put: null };
+      byStrike.set(bar.strike, {
+        call: add(held.call, bar.call),
+        put: add(held.put, bar.put),
+      });
+    }
+  }
+  return [...byStrike.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([strike, sides]) => ({
+      strike,
+      call: sides.call,
+      put: sides.put,
+      net: net(sides.call, sides.put),
+    }));
+}
+
+/** `a + b` where absence is not zero: two absences stay absent, one absence yields the
+ *  other. The asymmetry with `net` above is deliberate — that one is forming a difference
+ *  and treats absence as nothing; this one is merging observations. */
+function add(a: number | null, b: number | null): number | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return a + b;
+}
+
+/**
+ * The `count` strikes either side of the money, and the money's own.
+ *
+ * The STRIKES control. Counted in **listed strikes, not points**, so the window holds the
+ * same number of tradeable rows wherever the ladder thickens or thins — the same rule the
+ * structure chain's row window follows. `null` for `count` is ALL and returns the board
+ * unchanged; a board with no ATM strike is also returned unchanged, because there is
+ * nothing to centre on and quietly showing the lowest strikes would be worse than showing
+ * everything.
+ */
+export function strikeWindow(
+  bars: StrikeBar[],
+  atmStrike: number | null,
+  count: number | null,
+): StrikeBar[] {
+  if (count === null || atmStrike === null || bars.length === 0) return bars;
+  let centre = bars.findIndex((bar) => bar.strike === atmStrike);
+  if (centre < 0) {
+    centre = bars.reduce(
+      (best, bar, i) =>
+        Math.abs(bar.strike - atmStrike) < Math.abs(bars[best]!.strike - atmStrike) ? i : best,
+      0,
+    );
+  }
+  return bars.slice(Math.max(0, centre - count), centre + count + 1);
+}
+
+/**
+ * What the board holds in total on each side, and the ratio between them.
+ *
+ * `pcr` is puts over calls — the published direction, so a number above 1 means more puts
+ * are open than calls, as every desk reads it. `null` rather than `Infinity` when no calls
+ * are open at all: a ratio with nothing underneath it is not a large ratio.
+ */
+export function sideTotals(bars: StrikeBar[]): {
+  call: number;
+  put: number;
+  pcr: number | null;
+} {
+  let call = 0;
+  let put = 0;
+  for (const bar of bars) {
+    call += bar.call ?? 0;
+    put += bar.put ?? 0;
+  }
+  return { call, put, pcr: call === 0 ? null : put / call };
+}
+
+/** The strike carrying the most on one side — the wall the reference terminal badges.
+ *  `null` on a board with nothing on that side at all, where "the largest" names nothing. */
+export function peakStrike(bars: StrikeBar[], side: "call" | "put"): number | null {
+  let best: number | null = null;
+  let most = 0;
+  for (const bar of bars) {
+    const value = bar[side];
+    if (value === null || value <= most) continue;
+    most = value;
+    best = bar.strike;
+  }
+  return best;
+}
+
+/** One ranked strike on the GEX board: where it is, what it holds, and the rank it was
+ *  given. `rank` is 1-based so it can be read straight onto an `R1`/`S1` badge. */
+export interface Level {
+  readonly strike: number;
+  readonly value: number;
+  readonly rank: number;
+}
+
+/**
+ * The strikes holding the most gamma either side, ranked by size.
+ *
+ * Positive net is **resistance** and negative is **support**, which is the published
+ * reading of the dealer-short convention: where dealers are long gamma they sell into a
+ * rally and buy a dip, so price is pinned. The top of each list is the wall.
+ *
+ * **Ranked by size, not by distance from spot**, and the lists are not filtered to one
+ * side of it. A large positive strike below spot is still where the gamma is, and hiding
+ * it because of where the price happens to be standing would make the panel a function of
+ * two things while claiming to report one.
+ */
+export function levels(bars: StrikeBar[], count: number): { resistances: Level[]; supports: Level[] } {
+  const positive = bars.filter((bar) => bar.net > 0).sort((a, b) => b.net - a.net);
+  const negative = bars.filter((bar) => bar.net < 0).sort((a, b) => a.net - b.net);
+  const take = (list: StrikeBar[]): Level[] =>
+    list.slice(0, count).map((bar, i) => ({ strike: bar.strike, value: bar.net, rank: i + 1 }));
+  return { resistances: take(positive), supports: take(negative) };
+}
+
+/**
+ * Whole days from `now` to an expiry, for the DTE beside each entry in the panel.
+ *
+ * A string rearrangement into a UTC instant rather than `new Date("10-04-2026")`, which
+ * parses as a **local** date — the off-by-one `lib/instrument.ts` avoids for the same
+ * reason. Delta's expiries settle at 12:00 UTC, and that is the instant counted to:
+ * counting to midnight would call an expiry that still has half a trading day left `0D`.
+ *
+ * Rounded down, and never below zero. An expiry that has already settled shows `0D`
+ * rather than a negative, which would read as a date in the future written backwards.
+ */
+export function daysToExpiry(expiry: string, now: Date): number | null {
+  const match = /^(\d{2})-(\d{2})-(\d{4})$/.exec(expiry);
+  if (match === null) return null;
+  const [, day, month, year] = match;
+  const settles = Date.UTC(Number(year), Number(month) - 1, Number(day), 12, 0, 0);
+  const days = Math.floor((settles - now.getTime()) / 86_400_000);
+  return Math.max(0, days);
+}
